@@ -210,12 +210,41 @@ public class CoverLetterPromptBuilder {
     public String buildImprovementPrompt(JobPosting jobPosting, List<UserExperience> experiences,
                                            String question, String previousDraft,
                                            String reviewFeedbackJson, int iterationNum) {
+        return buildImprovementPrompt(jobPosting, experiences, question, previousDraft,
+            reviewFeedbackJson, iterationNum, null);
+    }
+
+    public String buildImprovementPrompt(JobPosting jobPosting, List<UserExperience> experiences,
+                                           String question, String previousDraft,
+                                           String reviewFeedbackJson, int iterationNum,
+                                           String targetedStrategy) {
         String experienceSummary = experiences.stream()
             .map(this::formatExperience)
             .collect(Collectors.joining("\n\n"));
 
         String tone = resolveTone(jobPosting.getCompanyType());
         String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
+
+        String improvementSection;
+        if (targetedStrategy != null && !targetedStrategy.isBlank()) {
+            improvementSection = """
+            %s
+
+            [추가 원칙]
+            1. 잘 쓴 부분은 반드시 유지하거나 더 강화하세요.
+            2. violations에 지적된 문장은 반드시 수정하세요.
+            3. improvements에 제시된 개선 방향과 예시를 적극 참고하세요.""".formatted(targetedStrategy);
+        } else {
+            improvementSection = """
+            [개선 원칙 — %d차 개선]
+            1. 잘 쓴 부분은 반드시 유지하거나 더 강화하세요.
+            2. violations에 지적된 문장은 반드시 수정하세요.
+            3. improvements에 제시된 개선 방향과 예시를 적극 참고하세요.
+            4. AI탐지 위험도가 높다면: 추상적 표현을 구체적으로 바꾸고, 어미 반복을 깨고, 감정과 생생한 디테일을 추가하세요.
+            5. 구체성 점수가 낮다면: 숫자, 프로젝트명, KPI, 정량적 성과를 반드시 추가하세요.
+            6. 조직적합도가 낮다면: 이 회사만의 특성, 문화, 기술 방향을 더 구체적으로 언급하세요.
+            7. 키워드 활용이 낮다면: 채용공고의 핵심 키워드를 자연스럽게 녹이세요.""".formatted(iterationNum);
+        }
 
         return """
             당신은 채용팀장의 피드백을 받고 자소서를 개선하는 전문가입니다.
@@ -225,14 +254,7 @@ public class CoverLetterPromptBuilder {
             순수 텍스트만 출력. 마크다운, 소제목, 번호, 불릿 전부 금지.
             단락 사이 빈 줄 하나로 구분. 자소서 본문만 출력.
 
-            [개선 원칙 — %d차 개선]
-            1. 잘 쓴 부분은 반드시 유지하거나 더 강화하세요.
-            2. violations에 지적된 문장은 반드시 수정하세요.
-            3. improvements에 제시된 개선 방향과 예시를 적극 참고하세요.
-            4. AI탐지 위험도가 높다면: 추상적 표현을 구체적으로 바꾸고, 어미 반복을 깨고, 감정과 생생한 디테일을 추가하세요.
-            5. 구체성 점수가 낮다면: 숫자, 프로젝트명, KPI, 정량적 성과를 반드시 추가하세요.
-            6. 조직적합도가 낮다면: 이 회사만의 특성, 문화, 기술 방향을 더 구체적으로 언급하세요.
-            7. 키워드 활용이 낮다면: 채용공고의 핵심 키워드를 자연스럽게 녹이세요.
+            %s
 
             [검토 피드백 (채용팀장)]
             %s
@@ -258,7 +280,7 @@ public class CoverLetterPromptBuilder {
             %s
 
             위 피드백을 모두 반영하여 개선된 자소서를 작성하세요. 자소서 본문만 출력하세요.""".formatted(
-                iterationNum,
+                improvementSection,
                 reviewFeedbackJson,
                 previousDraft,
                 question != null ? question : "(단일 자소서)",

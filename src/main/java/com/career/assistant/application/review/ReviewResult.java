@@ -1,5 +1,10 @@
 package com.career.assistant.application.review;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 public record ReviewResult(
     Scores scores,
     int totalScore,
@@ -44,6 +49,34 @@ public record ReviewResult(
 
     public boolean passThreshold() {
         return totalScore >= 85;
+    }
+
+    /**
+     * 8개 항목 중 점수가 낮은 순으로 topN개 반환.
+     * aiDetectionRisk는 반전(100-risk)하여 비교.
+     * 반환: List<Map<String, Object>> (name, field, score)
+     */
+    public java.util.List<Map<String, Object>> getWeakestDimensions(int topN) {
+        java.util.List<Map<String, Object>> dims = new ArrayList<>();
+        dims.add(dimEntry("답변적합도", "answerRelevance", scores.answerRelevance));
+        dims.add(dimEntry("직무적합도", "jobFit", scores.jobFit));
+        dims.add(dimEntry("조직적합도", "orgFit", scores.orgFit));
+        dims.add(dimEntry("구체성", "specificity", scores.specificity));
+        dims.add(dimEntry("진정성/개성", "authenticity", scores.authenticity));
+        dims.add(dimEntry("AI탐지 안전도", "aiDetectionRisk", 100 - scores.aiDetectionRisk));
+        dims.add(dimEntry("논리적 구조", "logicalStructure", scores.logicalStructure));
+        dims.add(dimEntry("키워드 활용", "keywordUsage", scores.keywordUsage));
+
+        dims.sort(Comparator.comparingInt(d -> (int) d.get("score")));
+        return dims.subList(0, Math.min(topN, dims.size()));
+    }
+
+    private static Map<String, Object> dimEntry(String name, String field, int score) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("name", name);
+        map.put("field", field);
+        map.put("score", score);
+        return map;
     }
 
     public static ReviewResult fallback() {

@@ -194,8 +194,10 @@ public class CoverLetterFacade {
             // 개선 프롬프트 생성 및 AI 호출
             log.info("[에이전트] 개선 프롬프트 생성 → v{} 작성 중...", latest.getVersion() + 1);
             try {
+                String targetedStrategy = buildTargetedStrategy(review);
+                log.info("[에이전트] 타겟 전략: {}", targetedStrategy.replace("\n", " | "));
                 String improvementPrompt = promptBuilder.buildImprovementPrompt(
-                    jobPosting, experiences, questionText, currentDraft, review.rawJson(), iteration
+                    jobPosting, experiences, questionText, currentDraft, review.rawJson(), iteration, targetedStrategy
                 );
                 String improvedContent = ai.generate(improvementPrompt);
 
@@ -216,6 +218,37 @@ public class CoverLetterFacade {
         }
 
         return latest;
+    }
+
+    String buildTargetedStrategy(ReviewResult review) {
+        var weakest = review.getWeakestDimensions(3);
+        StringBuilder sb = new StringBuilder();
+        sb.append("[가장 시급한 개선 영역]\n");
+        sb.append("아래 3개 항목이 가장 낮은 점수를 받았습니다. 이 영역을 집중적으로 개선하세요.\n\n");
+
+        for (var dim : weakest) {
+            String field = (String) dim.get("field");
+            String name = (String) dim.get("name");
+            int score = (int) dim.get("score");
+            String advice = getFixAdvice(field, score);
+            sb.append("▸ ").append(name).append(" (").append(score).append("점): ").append(advice).append("\n");
+        }
+
+        return sb.toString();
+    }
+
+    String getFixAdvice(String field, int score) {
+        return switch (field) {
+            case "answerRelevance" -> "첫 문장부터 질문 키워드에 직접 응답하세요. 질문이 묻는 것에 정면으로 답하세요.";
+            case "jobFit" -> "채용공고 자격요건의 기술 키워드를 본인 경험과 직접 연결하세요. 구체적 프로젝트와 성과를 매칭하세요.";
+            case "orgFit" -> "회사 분석의 핵심 가치/문화를 구체적으로 언급하세요. 이 회사만의 특성이 드러나야 합니다.";
+            case "specificity" -> "'많은 개선'→'응답시간 2.3초→0.4초'로 교체하세요. 숫자, 프로젝트명, KPI를 반드시 포함하세요.";
+            case "authenticity" -> "이 지원자만 쓸 수 있는 구체적 장면을 추가하세요. 날짜, 시간, 감정, 오감 디테일을 녹이세요.";
+            case "aiDetectionRisk" -> "어미 반복을 깨고, 구어체 전환어('솔직히', '돌이켜보면')를 추가하고, 감정 표현을 넣으세요.";
+            case "logicalStructure" -> "기승전결 순서를 점검하세요. 단락 간 논리 연결이 자연스러운지 확인하고, 비약이 있으면 연결 문장을 추가하세요.";
+            case "keywordUsage" -> "채용공고의 핵심 키워드 3~5개를 추출하여 문맥에 맞게 자연스럽게 포함하세요.";
+            default -> "해당 항목의 점수를 높이기 위해 구체성과 관련성을 강화하세요.";
+        };
     }
 
     private String serializeQuestions(List<EssayQuestion> questions) {
