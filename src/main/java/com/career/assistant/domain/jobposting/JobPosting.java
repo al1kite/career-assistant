@@ -33,6 +33,12 @@ public class JobPosting {
     @Column(columnDefinition = "TEXT")
     private String requirements;
 
+    @Column(name = "essay_questions_json", columnDefinition = "TEXT")
+    private String essayQuestionsJson;
+
+    @Column(name = "company_analysis", columnDefinition = "TEXT")
+    private String companyAnalysis;
+
     @Enumerated(EnumType.STRING)
     private PipelineStatus status;
 
@@ -54,13 +60,35 @@ public class JobPosting {
         this.status = PipelineStatus.CLEANED;
     }
 
+    public void updateCrawledInfo(String companyName, String jobDescription, String requirements,
+                                  String essayQuestionsJson) {
+        this.companyName = companyName;
+        this.jobDescription = jobDescription;
+        this.requirements = requirements;
+        this.essayQuestionsJson = essayQuestionsJson;
+        this.status = PipelineStatus.CLEANED;
+    }
+
     public void classify(CompanyType companyType) {
         this.companyType = companyType;
         this.status = PipelineStatus.SCORED;
     }
 
+    public void updateCompanyAnalysis(String analysisJson) {
+        this.companyAnalysis = analysisJson;
+        this.status = PipelineStatus.ANALYZED;
+    }
+
     public void markDrafted() {
         this.status = PipelineStatus.DRAFTED;
+    }
+
+    public void markReviewing() {
+        this.status = PipelineStatus.REVIEWING;
+    }
+
+    public void markFinalized() {
+        this.status = PipelineStatus.FINALIZED;
     }
 
     public void markFailed() {

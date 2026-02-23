@@ -30,8 +30,17 @@ public class CoverLetter {
 
     private int version;
 
+    @Column(name = "question_index")
+    private Integer questionIndex;
+
+    @Column(name = "question_text", columnDefinition = "TEXT")
+    private String questionText;
+
     @Column(columnDefinition = "TEXT")
     private String feedback;
+
+    @Column(name = "review_score")
+    private Integer reviewScore;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
@@ -46,7 +55,38 @@ public class CoverLetter {
         return letter;
     }
 
+    public static CoverLetter of(JobPosting jobPosting, String aiModel, String content,
+                                  Integer questionIndex, String questionText) {
+        CoverLetter letter = new CoverLetter();
+        letter.jobPosting = jobPosting;
+        letter.aiModel = aiModel;
+        letter.content = content;
+        letter.version = 1;
+        letter.questionIndex = questionIndex;
+        letter.questionText = questionText;
+        letter.createdAt = LocalDateTime.now();
+        return letter;
+    }
+
+    public static CoverLetter ofVersion(JobPosting jobPosting, String aiModel, String content,
+                                         int version, Integer questionIndex, String questionText) {
+        CoverLetter letter = new CoverLetter();
+        letter.jobPosting = jobPosting;
+        letter.aiModel = aiModel;
+        letter.content = content;
+        letter.version = version;
+        letter.questionIndex = questionIndex;
+        letter.questionText = questionText;
+        letter.createdAt = LocalDateTime.now();
+        return letter;
+    }
+
     public void addFeedback(String feedback) {
         this.feedback = feedback;
+    }
+
+    public void addReview(String feedbackJson, int score) {
+        this.feedback = feedbackJson;
+        this.reviewScore = score;
     }
 }

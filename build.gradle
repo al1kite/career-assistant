@@ -38,6 +38,9 @@ dependencies {
     implementation 'javax.xml.bind:jaxb-api:2.3.1'
     runtimeOnly 'org.glassfish.jaxb:jaxb-runtime:2.3.9'
 
+    // Swagger UI (springdoc-openapi)
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0'
+
     // HTTP Client (Claude/GPT API 호출)
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
 

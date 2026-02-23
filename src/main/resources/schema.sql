@@ -5,7 +5,9 @@ CREATE TABLE job_postings (
     company_type    VARCHAR(20),
     job_description TEXT,
     requirements    TEXT,
-    status          VARCHAR(20) DEFAULT 'FETCHED',
+    essay_questions_json TEXT,
+    company_analysis TEXT,
+    status          VARCHAR(30) DEFAULT 'FETCHED',
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uk_url (url(500))
 );
@@ -16,7 +18,10 @@ CREATE TABLE cover_letters (
     ai_model       VARCHAR(50),
     content        TEXT,
     version        INT DEFAULT 1,
+    question_index INT,
+    question_text  TEXT,
     feedback       TEXT,
+    review_score   INT,
     created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (job_posting_id) REFERENCES job_postings(id)
 );
