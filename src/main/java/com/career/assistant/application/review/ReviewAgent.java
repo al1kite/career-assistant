@@ -84,6 +84,11 @@ public class ReviewAgent {
     }
 
     private String buildReviewPrompt(String draft, JobPosting jobPosting, String question, int iterationNum) {
+        String companyAnalysis = jobPosting.getCompanyAnalysis();
+        String analysisSection = (companyAnalysis != null && !companyAnalysis.isBlank())
+            ? "\n            [회사 심층 분석 — 조직적합도 평가 시 참고]\n            " + companyAnalysis + "\n"
+            : "";
+
         return """
             [검토 대상 자소서 — %d차 검토]
 
@@ -91,7 +96,7 @@ public class ReviewAgent {
             회사: %s
             직무설명: %s
             자격요건: %s
-
+            %s
             [자소서 문항]
             %s
 
@@ -99,11 +104,13 @@ public class ReviewAgent {
             %s
 
             위 자소서를 8개 평가 항목으로 채점하고, violations과 improvements를 구체적으로 작성하세요.
+            조직적합도 평가 시, 회사 심층 분석 내용이 자소서에 얼마나 반영되었는지를 기준으로 채점하세요.
             반드시 순수 JSON만 출력하세요.""".formatted(
                 iterationNum,
                 jobPosting.getCompanyName(),
                 jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "",
                 jobPosting.getRequirements() != null ? jobPosting.getRequirements() : "",
+                analysisSection,
                 question != null ? question : "(단일 자소서)",
                 draft
             );
