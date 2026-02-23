@@ -1,0 +1,8 @@
+package com.career.assistant.domain.experience;
+
+public enum ExperienceCategory {
+    WORK,       // 직장 경험 (COCONE M)
+    PROJECT,    // 프로젝트
+    AWARD,      // 수상
+    ACTIVITY    // 대외활동
+}
