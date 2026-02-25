@@ -35,6 +35,18 @@ CREATE TABLE user_experiences (
     period      VARCHAR(50)
 );
 
+CREATE TABLE github_activities (
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+    repo_name       VARCHAR(100) NOT NULL,
+    topic           VARCHAR(100) NOT NULL,
+    last_commit_at  DATETIME,
+    commit_count    INT DEFAULT 0,
+    gap_days        INT DEFAULT 0,
+    status          VARCHAR(20) DEFAULT 'DORMANT',
+    updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_repo_topic (repo_name, topic)
+);
+
 CREATE TABLE pipeline_log (
     id         BIGINT AUTO_INCREMENT PRIMARY KEY,
     job_id     BIGINT,
