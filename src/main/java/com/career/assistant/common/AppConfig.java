@@ -14,6 +14,17 @@ public class AppConfig {
         return WebClient.builder().build();
     }
 
+    @Bean("githubWebClient")
+    public WebClient githubWebClient(@Value("${github.token:}") String token) {
+        WebClient.Builder builder = WebClient.builder()
+            .baseUrl("https://api.github.com")
+            .defaultHeader("Accept", "application/vnd.github+json");
+        if (token != null && !token.isBlank()) {
+            builder.defaultHeader("Authorization", "Bearer " + token);
+        }
+        return builder.build();
+    }
+
     @Bean("claudeSonnet")
     public ClaudeAdapter claudeSonnet(
         WebClient webClient,
