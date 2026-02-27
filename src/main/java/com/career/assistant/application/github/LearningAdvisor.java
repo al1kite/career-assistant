@@ -36,8 +36,7 @@ public class LearningAdvisor {
         - 하루 학습량: 코테 1문제 + CS 1주제 + 블로그 1초안
 
         [출력 형식]
-        반드시 아래 JSON 형식으로만 출력하세요. JSON 외 텍스트는 절대 금지.
-        ```json
+        반드시 순수 JSON만 출력하세요. 마크다운 코드블록(```) 없이 JSON만 출력하세요.
         {
           "gaps": [
             {"topic": "주제명", "gapDays": 숫자, "severity": "긴급|주의|양호", "reason": "구체적 사유"}
@@ -53,7 +52,6 @@ public class LearningAdvisor {
           ],
           "blogTopic": {"title": "블로그 제목", "outline": "개요"}
         }
-        ```
         gaps는 최대 3개, todayTasks 3개, problems 2개, quizzes 3개, blogTopic 1개를 생성하세요.
         """;
 
@@ -72,7 +70,7 @@ public class LearningAdvisor {
 
         if (activities.isEmpty()) {
             log.warn("No GitHub activities found. Run sync first.");
-            throw new IllegalStateException("GitHub 활동 데이터가 없습니다. 먼저 /api/github/sync를 호출하세요.");
+            throw new NoActivityDataException("GitHub 활동 데이터가 없습니다. 먼저 /api/github/sync를 호출하세요.");
         }
 
         String userPrompt = buildUserPrompt(activities);
@@ -103,23 +101,49 @@ public class LearningAdvisor {
     }
 
     private LearningRecommendation parseResponse(String response) {
-        // Extract JSON from response (Claude might wrap it in markdown code blocks)
-        String json = response.strip();
-        if (json.contains("```json")) {
-            json = json.substring(json.indexOf("```json") + 7);
-            json = json.substring(0, json.indexOf("```"));
-        } else if (json.contains("```")) {
-            json = json.substring(json.indexOf("```") + 3);
-            json = json.substring(0, json.indexOf("```"));
+        String json = extractJson(response);
+
+        if (json == null) {
+            log.warn("Failed to extract JSON from AI response. Response preview: {}",
+                response.substring(0, Math.min(300, response.length())));
+            throw new RuntimeException("AI 응답에서 유효한 JSON을 추출할 수 없습니다. 다시 시도해주세요.");
         }
-        json = json.strip();
 
         try {
             return objectMapper.readValue(json, LearningRecommendation.class);
         } catch (JsonProcessingException e) {
-            log.error("Failed to parse learning recommendation JSON: {}", e.getMessage());
-            log.debug("Raw response: {}", response);
+            log.warn("Failed to parse learning recommendation JSON: {}. JSON preview: {}",
+                e.getMessage(), json.substring(0, Math.min(300, json.length())));
             throw new RuntimeException("AI 응답 파싱 실패. 다시 시도해주세요.", e);
+        }
+    }
+
+    private String extractJson(String response) {
+        if (response == null || response.isBlank()) return null;
+
+        String trimmed = response.strip();
+
+        // 마크다운 코드블록 제거
+        if (trimmed.startsWith("```")) {
+            int endIdx = trimmed.lastIndexOf("```");
+            if (endIdx > 3) {
+                trimmed = trimmed.substring(trimmed.indexOf('\n') + 1, endIdx).strip();
+            }
+        }
+
+        // 가장 바깥 { ... } 블록 추출
+        int firstBrace = trimmed.indexOf('{');
+        int lastBrace = trimmed.lastIndexOf('}');
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+            return trimmed.substring(firstBrace, lastBrace + 1);
+        }
+
+        return null;
+    }
+
+    public static class NoActivityDataException extends RuntimeException {
+        public NoActivityDataException(String message) {
+            super(message);
         }
     }
 }

@@ -35,7 +35,7 @@ public record LearningRecommendation(
         String topic,
         String question,
         List<String> options,
-        int answer,
+        Integer answer,
         String explanation
     ) {}
 
