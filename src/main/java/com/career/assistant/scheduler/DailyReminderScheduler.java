@@ -11,16 +11,6 @@ public class DailyReminderScheduler {
 
     private final TelegramBotHandler telegramBotHandler;
 
-    // 매일 오전 9시
-    @Scheduled(cron = "0 0 9 * * *", zone = "Asia/Seoul")
-    public void morningBriefing() {
-        telegramBotHandler.sendMessage(
-            "🌅 좋은 아침입니다!\n\n" +
-            "오늘 자소서 1~2개 목표입니다 💪\n" +
-            "지원할 공고 링크를 보내주세요!"
-        );
-    }
-
     // 매일 밤 10시
     @Scheduled(cron = "0 0 22 * * *", zone = "Asia/Seoul")
     public void eveningCheck() {
