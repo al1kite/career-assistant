@@ -1,8 +1,7 @@
 package com.career.assistant.api;
 
+import com.career.assistant.application.github.BriefingService;
 import com.career.assistant.application.github.LearningAdvisor;
-import com.career.assistant.application.github.LearningRecommendation;
-import com.career.assistant.scheduler.MorningBriefingScheduler;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -23,7 +22,7 @@ import java.util.Map;
 public class LearningAdvisorController {
 
     private final LearningAdvisor learningAdvisor;
-    private final MorningBriefingScheduler morningBriefingScheduler;
+    private final BriefingService briefingService;
 
     @Operation(summary = "학습 공백 분석 + 맞춤 학습 추천",
         description = "GitHub 활동 데이터를 Claude AI가 분석하여 학습 공백, 오늘 할 일, 코테 문제, CS 퀴즈, 블로그 주제를 추천합니다. "
@@ -39,7 +38,7 @@ public class LearningAdvisorController {
                 Map.of("error", e.getMessage())
             );
         } catch (Exception e) {
-            log.error("Learning recommendation failed: {}", e.getMessage());
+            log.error("Learning recommendation failed", e);
             return ResponseEntity.internalServerError().body(
                 Map.of("error", "AI 분석 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
             );
@@ -53,12 +52,12 @@ public class LearningAdvisorController {
     @PostMapping("/briefing")
     public ResponseEntity<?> triggerBriefing() {
         try {
-            morningBriefingScheduler.sendMorningBriefing();
+            briefingService.executeBriefing();
             return ResponseEntity.ok(Map.of("message", "아침 브리핑이 텔레그램으로 전송되었습니다."));
         } catch (Exception e) {
-            log.error("Manual briefing trigger failed: {}", e.getMessage());
+            log.error("Manual briefing trigger failed", e);
             return ResponseEntity.internalServerError().body(
-                Map.of("error", "브리핑 실행 중 오류가 발생했습니다: " + e.getMessage())
+                Map.of("error", "브리핑 실행 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
             );
         }
     }

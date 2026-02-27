@@ -18,21 +18,15 @@ public class BriefingMessageFormatter {
         sb.append("아침 브리핑 — ").append(LocalDate.now().format(DATE_FMT)).append("\n");
         sb.append("════════════════════\n\n");
 
-        // 학습 공백
         if (rec.gaps() != null && !rec.gaps().isEmpty()) {
             sb.append("학습 공백 알림\n");
             for (var gap : rec.gaps()) {
-                String icon = switch (gap.severity()) {
-                    case "긴급" -> "[긴급]";
-                    case "주의" -> "[주의]";
-                    default -> "[양호]";
-                };
-                sb.append("  ").append(icon).append(" ").append(gap.reason()).append("\n");
+                String label = resolveSeverityLabel(gap.severity());
+                sb.append("  ").append(label).append(" ").append(gap.reason()).append("\n");
             }
             sb.append("\n");
         }
 
-        // 오늘 할 일
         if (rec.todayTasks() != null && !rec.todayTasks().isEmpty()) {
             sb.append("오늘 할 일\n");
             int i = 1;
@@ -67,10 +61,9 @@ public class BriefingMessageFormatter {
 
         sb.append("정답은 아래에서 확인하세요!\n\n");
 
-        // 정답 + 해설
         qNum = 1;
         for (var quiz : quizzes) {
-            char answerChar = quiz.answer() != null ? (char) ('A' + quiz.answer()) : '?';
+            char answerChar = normalizeAnswerIndex(quiz.answer(), quiz.options());
             sb.append("Q").append(qNum++).append(" 정답: ").append(answerChar);
             if (quiz.explanation() != null) {
                 sb.append("\n  -> ").append(quiz.explanation());
@@ -99,5 +92,31 @@ public class BriefingMessageFormatter {
         }
 
         return sb.toString();
+    }
+
+    private String resolveSeverityLabel(String severity) {
+        if (severity == null) return "[양호]";
+        return switch (severity) {
+            case "긴급" -> "[긴급]";
+            case "주의" -> "[주의]";
+            default -> "[양호]";
+        };
+    }
+
+    private char normalizeAnswerIndex(Integer answer, List<String> options) {
+        if (answer == null) return '?';
+
+        int optionCount = (options != null) ? options.size() : 4;
+
+        // 0-based (0~3) 허용
+        if (answer >= 0 && answer < optionCount) {
+            return (char) ('A' + answer);
+        }
+        // 1-based (1~4) 허용 → 0-based로 변환
+        if (answer >= 1 && answer <= optionCount) {
+            return (char) ('A' + answer - 1);
+        }
+
+        return '?';
     }
 }

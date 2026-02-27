@@ -61,10 +61,14 @@ public class ContentGenerator {
         log.info("Generating blog post: {}", topic.title());
         try {
             String content = claude.generate(BLOG_SYSTEM_PROMPT, userPrompt);
+            if (content == null) {
+                log.warn("Blog post generation returned null for: {}", topic.title());
+                return null;
+            }
             log.info("Blog post generated: {} ({}자)", topic.title(), content.length());
             return content;
         } catch (Exception e) {
-            log.error("Blog post generation failed: {}", e.getMessage());
+            log.error("Blog post generation failed: {}", topic.title(), e);
             return null;
         }
     }
@@ -87,10 +91,14 @@ public class ContentGenerator {
         log.info("Generating CS study note: {}", gap.topic());
         try {
             String content = claude.generate(CS_SYSTEM_PROMPT, userPrompt);
+            if (content == null) {
+                log.warn("CS study note generation returned null for: {}", gap.topic());
+                return null;
+            }
             log.info("CS study note generated: {} ({}자)", gap.topic(), content.length());
             return content;
         } catch (Exception e) {
-            log.error("CS study note generation failed: {}", e.getMessage());
+            log.error("CS study note generation failed: {}", gap.topic(), e);
             return null;
         }
     }

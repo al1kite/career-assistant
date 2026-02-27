@@ -87,7 +87,31 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
         return "D";
     }
 
+    private static final int MAX_MESSAGE_LENGTH = 4096;
+
     public void sendMessage(String text) {
+        if (text == null || text.isBlank()) return;
+
+        if (text.length() <= MAX_MESSAGE_LENGTH) {
+            doSend(text);
+            return;
+        }
+
+        int offset = 0;
+        while (offset < text.length()) {
+            int end = Math.min(offset + MAX_MESSAGE_LENGTH, text.length());
+            if (end < text.length()) {
+                int lastNewline = text.lastIndexOf('\n', end);
+                if (lastNewline > offset) {
+                    end = lastNewline + 1;
+                }
+            }
+            doSend(text.substring(offset, end));
+            offset = end;
+        }
+    }
+
+    private void doSend(String text) {
         SendMessage message = SendMessage.builder()
             .chatId(chatId)
             .text(text)
