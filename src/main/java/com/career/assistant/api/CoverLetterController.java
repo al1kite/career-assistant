@@ -1,15 +1,22 @@
 package com.career.assistant.api;
 
+import com.career.assistant.api.dto.CompanyCoverLetterSummary;
 import com.career.assistant.api.dto.CoverLetterAgentResponse;
+import com.career.assistant.api.dto.CoverLetterHistoryResponse;
 import com.career.assistant.api.dto.CoverLetterResponse;
 import com.career.assistant.api.dto.CrawlPreviewResponse;
 import com.career.assistant.api.dto.GenerateCoverLetterRequest;
+import com.career.assistant.api.dto.ReviewTrendResponse;
 import com.career.assistant.application.CoverLetterFacade;
+import com.career.assistant.domain.coverletter.CoverLetter;
 import com.career.assistant.domain.coverletter.CoverLetterRepository;
+import com.career.assistant.domain.jobposting.JobPosting;
 import com.career.assistant.domain.jobposting.JobPostingRepository;
 import com.career.assistant.infrastructure.crawling.CrawledJobInfo;
 import com.career.assistant.infrastructure.crawling.CrawlingException;
 import com.career.assistant.infrastructure.crawling.JsoupCrawler;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -32,6 +39,7 @@ public class CoverLetterController {
     private final CoverLetterRepository coverLetterRepository;
     private final JobPostingRepository jobPostingRepository;
     private final JsoupCrawler jsoupCrawler;
+    private final ObjectMapper objectMapper;
 
     @Operation(summary = "공고 미리보기 (크롤링만)", description = "URL을 크롤링하여 회사명, 직무설명, 자소서 문항을 미리 확인합니다. 자소서는 생성하지 않습니다.")
     @GetMapping("/preview")
@@ -135,7 +143,6 @@ public class CoverLetterController {
                     ));
                 }
                 try {
-                    var objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
                     var analysisNode = objectMapper.readTree(analysis);
                     return ResponseEntity.ok(Map.of(
                         "jobPostingId", jobPostingId,
@@ -151,5 +158,167 @@ public class CoverLetterController {
                 }
             })
             .orElse(ResponseEntity.notFound().build());
+    }
+
+    @Operation(summary = "전체 자소서 목록", description = "회사별로 그룹핑된 전체 자소서 목록을 조회합니다")
+    @GetMapping("/all")
+    public ResponseEntity<List<CompanyCoverLetterSummary>> getAll() {
+        List<JobPosting> allPostings = jobPostingRepository.findAll();
+        if (allPostings.isEmpty()) {
+            return ResponseEntity.ok(List.of());
+        }
+
+        List<Long> postingIds = allPostings.stream().map(JobPosting::getId).toList();
+        List<CoverLetter> allLetters = coverLetterRepository.findByJobPostingIdIn(postingIds);
+
+        Map<Long, List<CoverLetter>> byPosting = allLetters.stream()
+            .collect(Collectors.groupingBy(cl -> cl.getJobPosting().getId()));
+
+        List<CompanyCoverLetterSummary> result = new ArrayList<>();
+        for (JobPosting jp : allPostings) {
+            List<CoverLetter> letters = byPosting.getOrDefault(jp.getId(), List.of());
+            if (letters.isEmpty()) continue;
+
+            Map<Integer, CoverLetter> latestByQuestion = extractLatestByQuestion(letters);
+
+            List<CompanyCoverLetterSummary.QuestionSummary> questions = latestByQuestion.entrySet().stream()
+                .map(entry -> {
+                    CoverLetter cl = entry.getValue();
+                    return new CompanyCoverLetterSummary.QuestionSummary(
+                        entry.getKey(),
+                        cl.getQuestionText() != null ? cl.getQuestionText() : "",
+                        cl.getVersion(),
+                        cl.getReviewScore() != null ? cl.getReviewScore() : 0,
+                        resolveGrade(cl.getReviewScore())
+                    );
+                })
+                .toList();
+
+            result.add(new CompanyCoverLetterSummary(
+                jp.getId(),
+                jp.getCompanyName() != null ? jp.getCompanyName() : "",
+                latestByQuestion.size(),
+                questions
+            ));
+        }
+
+        return ResponseEntity.ok(result);
+    }
+
+    @Operation(summary = "버전별 히스토리", description = "자소서 ID로 같은 계열(공고+문항)의 전 버전을 조회합니다")
+    @GetMapping("/{id}/versions")
+    public ResponseEntity<CoverLetterHistoryResponse> getVersionHistory(@PathVariable Long id) {
+        return coverLetterRepository.findById(id)
+            .map(cl -> {
+                Long jpId = cl.getJobPosting().getId();
+
+                List<CoverLetter> allVersions = coverLetterRepository
+                    .findByJobPostingIdAndQuestionIndexOrderByVersionAsc(jpId, cl.getQuestionIndex());
+
+                List<CoverLetterHistoryResponse.VersionSnapshot> snapshots = allVersions.stream()
+                    .map(v -> new CoverLetterHistoryResponse.VersionSnapshot(
+                        v.getVersion(),
+                        v.getContent(),
+                        v.getReviewScore(),
+                        resolveGrade(v.getReviewScore()),
+                        extractOverallComment(v.getFeedback()),
+                        v.getCreatedAt()
+                    ))
+                    .toList();
+
+                return ResponseEntity.ok(new CoverLetterHistoryResponse(
+                    cl.getJobPosting().getCompanyName(),
+                    cl.getQuestionText(),
+                    snapshots
+                ));
+            })
+            .orElse(ResponseEntity.notFound().build());
+    }
+
+    @Operation(summary = "리뷰 점수 변화 추이", description = "자소서 ID로 같은 계열의 전 버전 리뷰 점수 변화를 추적합니다")
+    @GetMapping("/{id}/review-history")
+    public ResponseEntity<ReviewTrendResponse> getReviewHistory(@PathVariable Long id) {
+        return coverLetterRepository.findById(id)
+            .map(cl -> {
+                Long jpId = cl.getJobPosting().getId();
+
+                List<CoverLetter> allVersions = coverLetterRepository
+                    .findByJobPostingIdAndQuestionIndexOrderByVersionAsc(jpId, cl.getQuestionIndex());
+
+                List<ReviewTrendResponse.ScoreChange> trend = allVersions.stream()
+                    .filter(v -> v.getFeedback() != null && !v.getFeedback().isBlank())
+                    .map(v -> {
+                        Map<String, Integer> dimScores = new LinkedHashMap<>();
+                        List<String> improvements = List.of();
+                        int totalScore = v.getReviewScore() != null ? v.getReviewScore() : 0;
+
+                        try {
+                            JsonNode root = objectMapper.readTree(v.getFeedback());
+                            JsonNode scores = root.get("scores");
+                            if (scores != null) {
+                                dimScores.put("answerRelevance", scores.path("answerRelevance").asInt());
+                                dimScores.put("jobFit", scores.path("jobFit").asInt());
+                                dimScores.put("orgFit", scores.path("orgFit").asInt());
+                                dimScores.put("specificity", scores.path("specificity").asInt());
+                                dimScores.put("authenticity", scores.path("authenticity").asInt());
+                                dimScores.put("aiDetectionRisk", scores.path("aiDetectionRisk").asInt());
+                                dimScores.put("logicalStructure", scores.path("logicalStructure").asInt());
+                                dimScores.put("keywordUsage", scores.path("keywordUsage").asInt());
+                            }
+                            JsonNode impNode = root.get("improvements");
+                            if (impNode != null && impNode.isArray()) {
+                                List<String> imp = new ArrayList<>();
+                                for (JsonNode item : impNode) {
+                                    imp.add(item.asText());
+                                }
+                                improvements = imp;
+                            }
+                        } catch (Exception e) {
+                            log.warn("피드백 JSON 파싱 실패 (coverletter id={}): {}", v.getId(), e.getMessage());
+                        }
+
+                        return new ReviewTrendResponse.ScoreChange(
+                            v.getVersion(), totalScore, dimScores, improvements
+                        );
+                    })
+                    .toList();
+
+                return ResponseEntity.ok(new ReviewTrendResponse(
+                    cl.getJobPosting().getCompanyName(), trend
+                ));
+            })
+            .orElse(ResponseEntity.notFound().build());
+    }
+
+    private static Map<Integer, CoverLetter> extractLatestByQuestion(List<CoverLetter> letters) {
+        Map<Integer, CoverLetter> latest = new LinkedHashMap<>();
+        for (CoverLetter cl : letters) {
+            int qIdx = cl.getQuestionIndex() != null ? cl.getQuestionIndex() : 0;
+            CoverLetter existing = latest.get(qIdx);
+            if (existing == null || cl.getVersion() > existing.getVersion()) {
+                latest.put(qIdx, cl);
+            }
+        }
+        return latest;
+    }
+
+    private String resolveGrade(Integer score) {
+        if (score == null) return "-";
+        if (score >= 90) return "S";
+        if (score >= 80) return "A";
+        if (score >= 70) return "B";
+        if (score >= 60) return "C";
+        return "D";
+    }
+
+    private String extractOverallComment(String feedbackJson) {
+        if (feedbackJson == null || feedbackJson.isBlank()) return null;
+        try {
+            JsonNode root = objectMapper.readTree(feedbackJson);
+            JsonNode comment = root.get("overallComment");
+            return comment != null ? comment.asText() : null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 }
