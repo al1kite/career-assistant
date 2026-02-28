@@ -49,10 +49,16 @@ public class ClaudeAdapter implements AiPort {
     }
 
     private String callClaude(String systemPrompt, String userPrompt) {
+        Map<String, Object> systemBlock = Map.of(
+            "type", "text",
+            "text", systemPrompt,
+            "cache_control", Map.of("type", "ephemeral")
+        );
+
         Map<String, Object> requestBody = Map.of(
             "model", modelName,
             "max_tokens", 4096,
-            "system", systemPrompt,
+            "system", List.of(systemBlock),
             "messages", List.of(Map.of("role", "user", "content", userPrompt))
         );
 
@@ -62,6 +68,7 @@ public class ClaudeAdapter implements AiPort {
                 .uri("https://api.anthropic.com/v1/messages")
                 .header("x-api-key", apiKey)
                 .header("anthropic-version", "2023-06-01")
+                .header("anthropic-beta", "prompt-caching-2024-07-31")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(requestBody)
                 .retrieve()

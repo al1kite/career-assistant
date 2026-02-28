@@ -57,21 +57,18 @@ public class ReviewAgent {
           "overallComment": "전체 총평 (2~3문장)"
         }""";
 
-    private final AiPort claudeSonnet;
     private final AiPort claudeHaiku;
     private final ObjectMapper objectMapper;
 
-    public ReviewAgent(@Qualifier("claudeSonnet") AiPort claudeSonnet,
-                       @Qualifier("claudeHaiku") AiPort claudeHaiku,
+    public ReviewAgent(@Qualifier("claudeHaiku") AiPort claudeHaiku,
                        ObjectMapper objectMapper) {
-        this.claudeSonnet = claudeSonnet;
         this.claudeHaiku = claudeHaiku;
         this.objectMapper = objectMapper;
     }
 
     public ReviewResult review(String draft, JobPosting jobPosting, String question, int iterationNum) {
         String userPrompt = buildReviewPrompt(draft, jobPosting, question, iterationNum);
-        AiPort reviewer = (iterationNum == 1) ? claudeSonnet : claudeHaiku;
+        AiPort reviewer = claudeHaiku;
 
         try {
             log.info("[에이전트] {}차 검토 — 모델: {}", iterationNum, reviewer.getModelName());

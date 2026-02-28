@@ -39,7 +39,7 @@ public class ContentGenerator {
         - 실무 연관성을 포함 (예: "실제 서비스에서 이 개념이 왜 중요한지")
         """;
 
-    public ContentGenerator(@Qualifier("claudeSonnet") AiPort claude) {
+    public ContentGenerator(@Qualifier("claudeHaiku") AiPort claude) {
         this.claude = claude;
     }
 
