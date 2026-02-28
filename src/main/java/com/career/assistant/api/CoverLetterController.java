@@ -205,15 +205,6 @@ public class CoverLetterController {
         return ResponseEntity.ok(result);
     }
 
-    @Operation(summary = "특정 공고의 자소서 목록 (path variable)", description = "특정 채용공고의 자소서 목록을 path variable 방식으로 조회합니다")
-    @GetMapping("/job/{jobPostingId}")
-    public ResponseEntity<List<CoverLetterResponse>> getByJobPostingPath(@PathVariable Long jobPostingId) {
-        var letters = coverLetterRepository.findByJobPostingId(jobPostingId).stream()
-            .map(CoverLetterResponse::from)
-            .toList();
-        return ResponseEntity.ok(letters);
-    }
-
     @Operation(summary = "버전별 히스토리", description = "자소서 ID로 같은 계열(공고+문항)의 전 버전을 조회합니다")
     @GetMapping("/{id}/versions")
     public ResponseEntity<CoverLetterHistoryResponse> getVersionHistory(@PathVariable Long id) {

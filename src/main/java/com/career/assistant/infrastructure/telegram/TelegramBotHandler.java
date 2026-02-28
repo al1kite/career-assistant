@@ -114,7 +114,7 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
         Map<Long, List<CoverLetter>> byPosting = letters.stream()
             .collect(Collectors.groupingBy(cl -> cl.getJobPosting().getId()));
 
-        StringBuilder sb = new StringBuilder("최근 자소서 기록\n\n");
+        StringBuilder sb = new StringBuilder();
         for (JobPosting jp : recent) {
             List<CoverLetter> cls = byPosting.getOrDefault(jp.getId(), List.of());
             if (cls.isEmpty()) continue;
@@ -133,7 +133,12 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
                 resolveGrade(avgScore)
             ));
         }
-        sendMessage(sb.toString());
+
+        if (sb.isEmpty()) {
+            sendMessage("저장된 자소서가 없습니다.");
+        } else {
+            sendMessage("최근 자소서 기록\n\n" + sb);
+        }
     }
 
     private void handleCompanyHistory(String companyName) {
@@ -175,14 +180,14 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
             return;
         }
 
-        String companyName = parts[0];
         int questionIndex;
         try {
-            questionIndex = Integer.parseInt(parts[1]);
+            questionIndex = Integer.parseInt(parts[parts.length - 1]);
         } catch (NumberFormatException e) {
-            sendMessage("문항번호는 숫자여야 합니다.\n예: /비교 카카오 1");
+            sendMessage("사용법: /비교 {회사명} {문항번호}\n예: /비교 카카오 1");
             return;
         }
+        String companyName = String.join(" ", Arrays.copyOf(parts, parts.length - 1));
 
         List<JobPosting> matched = jobPostingRepository.findByCompanyNameContaining(companyName);
         if (matched.isEmpty()) {
@@ -231,7 +236,7 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
         int lastScore = last.getReviewScore() != null ? last.getReviewScore() : 0;
         int diff = lastScore - firstScore;
         String arrow = diff > 0 ? "+" + diff : String.valueOf(diff);
-        sb.append("\nv1→v%d: %d점 → %d점 (%s)".formatted(last.getVersion(), firstScore, lastScore, arrow));
+        sb.append("\nv%d→v%d: %d점 → %d점 (%s)".formatted(first.getVersion(), last.getVersion(), firstScore, lastScore, arrow));
 
         sendMessage(sb.toString());
     }
