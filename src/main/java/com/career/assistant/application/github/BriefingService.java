@@ -1,5 +1,6 @@
 package com.career.assistant.application.github;
 
+import com.career.assistant.application.kpt.DailyTasksHolder;
 import com.career.assistant.infrastructure.telegram.TelegramBotHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,6 +18,7 @@ public class BriefingService {
     private final ContentGenerator contentGenerator;
     private final BriefingMessageFormatter formatter;
     private final TelegramBotHandler telegramBotHandler;
+    private final DailyTasksHolder dailyTasksHolder;
 
     public void executeBriefing() {
         log.info("Morning briefing started");
@@ -32,6 +34,8 @@ public class BriefingService {
                 telegramBotHandler.sendMessage("GitHub 활동 데이터가 없어 브리핑을 생성할 수 없습니다.");
                 return;
             }
+
+            dailyTasksHolder.update(rec.todayTasks());
 
             String briefing = formatter.formatBriefing(rec);
             telegramBotHandler.sendMessage(briefing);
