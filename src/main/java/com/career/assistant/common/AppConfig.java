@@ -1,13 +1,27 @@
 package com.career.assistant.common;
 
 import com.career.assistant.infrastructure.ai.ClaudeAdapter;
+import com.career.assistant.infrastructure.telegram.TelegramBotHandler;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.telegram.telegrambots.meta.TelegramBotsApi;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
 
+@Slf4j
 @Configuration
 public class AppConfig {
+
+    @Bean
+    public TelegramBotsApi telegramBotsApi(TelegramBotHandler botHandler) throws TelegramApiException {
+        TelegramBotsApi api = new TelegramBotsApi(DefaultBotSession.class);
+        api.registerBot(botHandler);
+        log.info("텔레그램 봇 등록 완료");
+        return api;
+    }
 
     @Bean
     public WebClient webClient() {
