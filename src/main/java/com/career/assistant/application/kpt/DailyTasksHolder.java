@@ -3,6 +3,8 @@ package com.career.assistant.application.kpt;
 import com.career.assistant.application.github.LearningRecommendation.DailyTask;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 
 /**
@@ -12,13 +14,20 @@ import java.util.List;
 @Component
 public class DailyTasksHolder {
 
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
     private volatile List<DailyTask> todayTasks = List.of();
+    private volatile LocalDate updatedDate;
 
     public void update(List<DailyTask> tasks) {
         this.todayTasks = tasks != null ? List.copyOf(tasks) : List.of();
+        this.updatedDate = LocalDate.now(KST);
     }
 
     public List<DailyTask> get() {
+        if (updatedDate == null || !updatedDate.equals(LocalDate.now(KST))) {
+            return List.of();
+        }
         return todayTasks;
     }
 }

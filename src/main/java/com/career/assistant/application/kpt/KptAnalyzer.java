@@ -15,12 +15,16 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Service
 public class KptAnalyzer {
+
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private static final String KPT_SYSTEM_PROMPT = """
         당신은 개발자 학습 코치입니다.
@@ -93,7 +97,7 @@ public class KptAnalyzer {
         KptResult result = parseResponse(response);
 
         KptRecord record = KptRecord.of(
-            LocalDate.now(),
+            LocalDate.now(KST),
             todayActivity,
             toJson(result.keep()),
             toJson(result.problem()),
@@ -106,12 +110,13 @@ public class KptAnalyzer {
     }
 
     private String fetchTodayActivity() {
-        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
+        ZonedDateTime kstStartOfDay = LocalDate.now(KST).atStartOfDay(KST);
+        LocalDateTime sinceUtc = kstStartOfDay.withZoneSameInstant(ZoneId.of("UTC")).toLocalDateTime();
         StringBuilder sb = new StringBuilder();
 
-        appendRepoCommits(sb, codingTestRepo, "코딩테스트", startOfDay);
-        appendRepoCommits(sb, blogRepo, "블로그", startOfDay);
-        appendRepoCommits(sb, csStudyRepo, "CS 스터디", startOfDay);
+        appendRepoCommits(sb, codingTestRepo, "코딩테스트", sinceUtc);
+        appendRepoCommits(sb, blogRepo, "블로그", sinceUtc);
+        appendRepoCommits(sb, csStudyRepo, "CS 스터디", sinceUtc);
 
         return sb.isEmpty() ? "오늘 GitHub 커밋 없음" : sb.toString().strip();
     }
@@ -148,19 +153,24 @@ public class KptAnalyzer {
     }
 
     private KptResult parseResponse(String response) {
+        if (response == null || response.isBlank()) {
+            log.warn("KPT analysis returned null or blank response");
+            throw new RuntimeException("KPT 분석 응답이 비어있습니다.");
+        }
+
         String json = extractJson(response);
 
         if (json == null) {
-            log.warn("Failed to extract JSON from KPT response. Response preview: {}",
-                response.substring(0, Math.min(300, response.length())));
+            String preview = response.substring(0, Math.min(300, response.length()));
+            log.warn("Failed to extract JSON from KPT response. Response preview: {}", preview);
             throw new RuntimeException("KPT 분석 응답에서 유효한 JSON을 추출할 수 없습니다.");
         }
 
         try {
             return objectMapper.readValue(json, KptResult.class);
         } catch (JsonProcessingException e) {
-            log.warn("Failed to parse KPT JSON: {}. JSON preview: {}",
-                e.getMessage(), json.substring(0, Math.min(300, json.length())));
+            String preview = json.substring(0, Math.min(300, json.length()));
+            log.warn("Failed to parse KPT JSON: {}. JSON preview: {}", e.getMessage(), preview);
             throw new RuntimeException("KPT 분석 응답 파싱 실패.", e);
         }
     }

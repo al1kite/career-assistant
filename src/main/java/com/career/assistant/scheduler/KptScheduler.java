@@ -1,6 +1,5 @@
 package com.career.assistant.scheduler;
 
-import com.career.assistant.application.github.GitHubAnalyzer;
 import com.career.assistant.application.kpt.KptAnalyzer;
 import com.career.assistant.application.kpt.KptMessageFormatter;
 import com.career.assistant.domain.kpt.KptRecord;
@@ -15,7 +14,6 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class KptScheduler {
 
-    private final GitHubAnalyzer gitHubAnalyzer;
     private final KptAnalyzer kptAnalyzer;
     private final KptMessageFormatter kptMessageFormatter;
     private final TelegramBotHandler telegramBotHandler;
@@ -25,7 +23,6 @@ public class KptScheduler {
         log.info("KPT evening analysis started");
 
         try {
-            gitHubAnalyzer.syncAll();
             KptRecord record = kptAnalyzer.analyze();
             String formatted = kptMessageFormatter.formatResult(record);
             telegramBotHandler.sendMessage(formatted);
