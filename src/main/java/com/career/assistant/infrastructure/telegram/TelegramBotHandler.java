@@ -62,19 +62,25 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
         if (!update.hasMessage() || !update.getMessage().hasText()) return;
 
         String text = update.getMessage().getText().trim();
+        log.info("수신된 메시지: '{}' (chatId: {})", text, update.getMessage().getChatId());
 
-        if (text.startsWith("/start")) {
-            handleStartCommand();
-        } else if (text.startsWith("/kpt")) {
-            handleKptCommand(text);
-        } else if (text.startsWith("/비교")) {
-            handleCompareCommand(text);
-        } else if (text.startsWith("/기록")) {
-            handleHistoryCommand(text);
-        } else if (isUrl(text)) {
-            handleJobUrl(text);
-        } else {
-            handleStartCommand();
+        try {
+            if (text.startsWith("/start")) {
+                handleStartCommand();
+            } else if (text.startsWith("/kpt")) {
+                handleKptCommand(text);
+            } else if (text.startsWith("/비교")) {
+                handleCompareCommand(text);
+            } else if (text.startsWith("/기록")) {
+                handleHistoryCommand(text);
+            } else if (isUrl(text)) {
+                handleJobUrl(text);
+            } else {
+                handleStartCommand();
+            }
+        } catch (Exception e) {
+            log.error("메시지 처리 중 오류 발생: {}", text, e);
+            sendMessage("오류가 발생했습니다: " + e.getMessage());
         }
     }
 
