@@ -103,11 +103,11 @@ public class JobCollectorService {
     private String normalizeForDedup(String companyName, String title) {
         String raw = (companyName != null ? companyName : "") + (title != null ? title : "");
         return raw.toLowerCase()
-            .replaceAll("[\\s｜|\\-–—·•()（）\\[\\]{}]", "")  // 공백, 구분자, 괄호 제거
-            .replaceAll("[.,;:!?]", "")                        // 구두점 제거
-            .replaceAll("(주)", "")                             // (주) 제거
-            .replaceAll("주식회사", "")                          // 주식회사 제거
-            .replaceAll("\\(.*?\\)", "");                       // 괄호 내용 제거
+            .replace("(주)", "")                                // (주) 리터럴 제거
+            .replace("주식회사", "")                              // 주식회사 제거
+            .replaceAll("\\(.*?\\)", "")                        // 괄호 내용 제거
+            .replaceAll("[\\s｜|\\-–—·•()（）\\[\\]{}]", "")     // 공백, 구분자, 괄호 제거
+            .replaceAll("[.,;:!?]", "");                        // 구두점 제거
     }
 
     public List<JobPosting> findUpcomingDeadlines() {
