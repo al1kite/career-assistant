@@ -20,6 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -47,6 +48,13 @@ public class CoverLetterFacade {
         if (jobPostingRepository.existsByUrl(url)) {
             log.info("이미 처리된 공고: {}", url);
             JobPosting existing = jobPostingRepository.findByUrl(url).orElseThrow();
+
+            // 자동수집으로 FETCHED 상태인 공고 → 크롤링/분석부터 다시 수행
+            if (existing.needsCrawling()) {
+                log.info("수집만 된 공고 — 크롤링/분석 시작: {}", url);
+                return crawlAndGenerate(existing);
+            }
+
             List<CoverLetter> existingLetters = coverLetterRepository.findByJobPostingId(existing.getId());
             if (!existingLetters.isEmpty()) {
                 return existingLetters;
@@ -57,18 +65,24 @@ public class CoverLetterFacade {
         JobPosting jobPosting = JobPosting.from(url);
         jobPostingRepository.save(jobPosting);
 
+        return crawlAndGenerate(jobPosting);
+    }
+
+    private List<CoverLetter> crawlAndGenerate(JobPosting jobPosting) {
         try {
             // 1단계: 크롤링
-            CrawledJobInfo crawledInfo = jsoupCrawler.crawl(url);
+            CrawledJobInfo crawledInfo = jsoupCrawler.crawl(jobPosting.getUrl());
             List<EssayQuestion> essayQuestions = crawledInfo.essayQuestions();
 
             String essayQuestionsJson = serializeQuestions(essayQuestions);
+            LocalDate deadline = parseDeadline(crawledInfo.deadline());
 
             jobPosting.updateCrawledInfo(
                 crawledInfo.companyName(),
                 crawledInfo.jobDescription(),
                 crawledInfo.requirements(),
-                essayQuestionsJson
+                essayQuestionsJson,
+                deadline
             );
 
             // 2단계: 회사 유형 분류
@@ -95,7 +109,7 @@ public class CoverLetterFacade {
 
         } catch (Exception e) {
             jobPosting.markFailed();
-            log.error("자소서 생성 실패: {}", url, e);
+            log.error("자소서 생성 실패: {}", jobPosting.getUrl(), e);
             throw e;
         }
     }
@@ -249,6 +263,20 @@ public class CoverLetterFacade {
             case "keywordUsage" -> "채용공고의 핵심 키워드 3~5개를 추출하여 문맥에 맞게 자연스럽게 포함하세요.";
             default -> "해당 항목의 점수를 높이기 위해 구체성과 관련성을 강화하세요.";
         };
+    }
+
+    private LocalDate parseDeadline(String deadline) {
+        if (deadline == null || deadline.isBlank()) return null;
+        try {
+            String cleaned = deadline.contains("T") ? deadline.split("T")[0] : deadline;
+            cleaned = cleaned.replaceAll("[^0-9\\-./]", "").trim();
+            if (cleaned.contains(".")) cleaned = cleaned.replace(".", "-");
+            if (cleaned.contains("/")) cleaned = cleaned.replace("/", "-");
+            return LocalDate.parse(cleaned);
+        } catch (Exception e) {
+            log.debug("마감일 파싱 실패: {}", deadline);
+            return null;
+        }
     }
 
     private String serializeQuestions(List<EssayQuestion> questions) {

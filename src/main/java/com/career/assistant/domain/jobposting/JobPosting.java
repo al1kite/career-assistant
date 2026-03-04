@@ -5,6 +5,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
@@ -39,6 +40,9 @@ public class JobPosting {
     @Column(name = "company_analysis", columnDefinition = "TEXT")
     private String companyAnalysis;
 
+    @Column
+    private LocalDate deadline;
+
     @Enumerated(EnumType.STRING)
     private PipelineStatus status;
 
@@ -51,6 +55,22 @@ public class JobPosting {
         posting.status = PipelineStatus.FETCHED;
         posting.createdAt = LocalDateTime.now();
         return posting;
+    }
+
+    public static JobPosting fromCollected(String url, String companyName, String title, LocalDate deadline) {
+        JobPosting posting = new JobPosting();
+        posting.url = url;
+        posting.companyName = companyName;
+        posting.jobDescription = title;
+        posting.deadline = deadline;
+        posting.companyType = CompanyType.UNKNOWN;
+        posting.status = PipelineStatus.FETCHED;
+        posting.createdAt = LocalDateTime.now();
+        return posting;
+    }
+
+    public boolean needsCrawling() {
+        return this.status == PipelineStatus.FETCHED;
     }
 
     public void updateCrawledInfo(String companyName, String jobDescription, String requirements) {
@@ -66,6 +86,16 @@ public class JobPosting {
         this.jobDescription = jobDescription;
         this.requirements = requirements;
         this.essayQuestionsJson = essayQuestionsJson;
+        this.status = PipelineStatus.CLEANED;
+    }
+
+    public void updateCrawledInfo(String companyName, String jobDescription, String requirements,
+                                  String essayQuestionsJson, LocalDate deadline) {
+        this.companyName = companyName;
+        this.jobDescription = jobDescription;
+        this.requirements = requirements;
+        this.essayQuestionsJson = essayQuestionsJson;
+        this.deadline = deadline;
         this.status = PipelineStatus.CLEANED;
     }
 

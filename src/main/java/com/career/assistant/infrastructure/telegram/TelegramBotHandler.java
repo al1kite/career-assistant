@@ -1,6 +1,7 @@
 package com.career.assistant.infrastructure.telegram;
 
 import com.career.assistant.application.CoverLetterFacade;
+import com.career.assistant.application.jobcollector.JobCollectorService;
 import com.career.assistant.application.kpt.KptMessageFormatter;
 import com.career.assistant.domain.coverletter.CoverLetter;
 import com.career.assistant.domain.coverletter.CoverLetterRepository;
@@ -32,6 +33,7 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
     private final CoverLetterFacade coverLetterFacade;
     private final CoverLetterRepository coverLetterRepository;
     private final JobPostingRepository jobPostingRepository;
+    private final JobCollectorService jobCollectorService;
     private final KptMessageFormatter kptMessageFormatter;
     private final KptRecordRepository kptRecordRepository;
     private final ObjectMapper objectMapper;
@@ -41,6 +43,7 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
         CoverLetterFacade coverLetterFacade,
         CoverLetterRepository coverLetterRepository,
         JobPostingRepository jobPostingRepository,
+        JobCollectorService jobCollectorService,
         KptMessageFormatter kptMessageFormatter,
         KptRecordRepository kptRecordRepository,
         ObjectMapper objectMapper,
@@ -51,6 +54,7 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
         this.coverLetterFacade = coverLetterFacade;
         this.coverLetterRepository = coverLetterRepository;
         this.jobPostingRepository = jobPostingRepository;
+        this.jobCollectorService = jobCollectorService;
         this.kptMessageFormatter = kptMessageFormatter;
         this.kptRecordRepository = kptRecordRepository;
         this.objectMapper = objectMapper;
@@ -75,6 +79,8 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
         try {
             if (text.startsWith("/start")) {
                 handleStartCommand();
+            } else if (text.startsWith("/공고")) {
+                handleJobListCommand();
             } else if (text.startsWith("/kpt")) {
                 handleKptCommand(text);
             } else if (text.startsWith("/비교")) {
@@ -100,9 +106,13 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
             + "취업 준비를 도와주는 AI 봇입니다.\n\n"
             + "[자동 기능]\n"
             + "  매일 06:00 — 아침 브리핑 (학습 공백 분석 + 코테/CS/블로그 추천)\n"
+            + "  매일 08:00 — 채용공고 자동 수집 (자소설닷컴/원티드/사람인)\n"
+            + "  매일 09:00 — 마감 임박 공고 알림 (3일 이내)\n"
             + "  매일 22:00 — KPT 회고 (GitHub 커밋 기반 자동 분석)\n\n"
+            + "[채용공고]\n"
+            + "  /공고 — 수집된 활성 공고 목록\n"
+            + "  채용공고 URL 전송 — AI 자소서 생성 (크롤링 → 분석 → 생성 → 검토)\n\n"
             + "[자소서]\n"
-            + "  채용공고 URL 전송 — AI 자소서 생성 (크롤링 → 분석 → 생성 → 검토)\n"
             + "  /기록 — 최근 자소서 요약 (최근 5개 회사)\n"
             + "  /기록 {회사명} — 해당 회사 문항별 점수\n"
             + "  /비교 {회사명} {문항번호} — 버전별 점수 변화 비교\n\n"
@@ -110,6 +120,12 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
             + "  /kpt — 최근 7일 KPT 기록\n"
             + "  /kpt 주간 — 이번 주 KPT 요약 (달성률 추이)\n\n"
             + "채용공고 URL을 보내주시면 바로 시작합니다!");
+    }
+
+    // ── 채용공고 ──────────────────────────────────────────
+
+    private void handleJobListCommand() {
+        sendMessage(jobCollectorService.getActivePostingsSummary());
     }
 
     // ── KPT 회고 ──────────────────────────────────────────
