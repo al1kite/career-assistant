@@ -7,6 +7,8 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.springframework.stereotype.Component;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -32,7 +34,8 @@ public class SaraminListingCrawler implements JobSiteCrawler {
         for (String keyword : KEYWORDS) {
             for (int page = 1; page <= maxPages; page++) {
                 try {
-                    Document doc = Jsoup.connect(String.format(SEARCH_URL, keyword, page))
+                    String encodedKeyword = URLEncoder.encode(keyword, StandardCharsets.UTF_8);
+                    Document doc = Jsoup.connect(String.format(SEARCH_URL, encodedKeyword, page))
                         .userAgent(USER_AGENT)
                         .timeout(10_000)
                         .get();
