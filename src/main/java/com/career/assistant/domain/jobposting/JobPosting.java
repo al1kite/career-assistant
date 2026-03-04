@@ -63,9 +63,14 @@ public class JobPosting {
         posting.companyName = companyName;
         posting.jobDescription = title;
         posting.deadline = deadline;
+        posting.companyType = CompanyType.UNKNOWN;
         posting.status = PipelineStatus.FETCHED;
         posting.createdAt = LocalDateTime.now();
         return posting;
+    }
+
+    public boolean needsCrawling() {
+        return this.status == PipelineStatus.FETCHED;
     }
 
     public void updateCrawledInfo(String companyName, String jobDescription, String requirements) {

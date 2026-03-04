@@ -48,6 +48,13 @@ public class CoverLetterFacade {
         if (jobPostingRepository.existsByUrl(url)) {
             log.info("이미 처리된 공고: {}", url);
             JobPosting existing = jobPostingRepository.findByUrl(url).orElseThrow();
+
+            // 자동수집으로 FETCHED 상태인 공고 → 크롤링/분석부터 다시 수행
+            if (existing.needsCrawling()) {
+                log.info("수집만 된 공고 — 크롤링/분석 시작: {}", url);
+                return crawlAndGenerate(existing);
+            }
+
             List<CoverLetter> existingLetters = coverLetterRepository.findByJobPostingId(existing.getId());
             if (!existingLetters.isEmpty()) {
                 return existingLetters;
@@ -58,9 +65,13 @@ public class CoverLetterFacade {
         JobPosting jobPosting = JobPosting.from(url);
         jobPostingRepository.save(jobPosting);
 
+        return crawlAndGenerate(jobPosting);
+    }
+
+    private List<CoverLetter> crawlAndGenerate(JobPosting jobPosting) {
         try {
             // 1단계: 크롤링
-            CrawledJobInfo crawledInfo = jsoupCrawler.crawl(url);
+            CrawledJobInfo crawledInfo = jsoupCrawler.crawl(jobPosting.getUrl());
             List<EssayQuestion> essayQuestions = crawledInfo.essayQuestions();
 
             String essayQuestionsJson = serializeQuestions(essayQuestions);
@@ -98,7 +109,7 @@ public class CoverLetterFacade {
 
         } catch (Exception e) {
             jobPosting.markFailed();
-            log.error("자소서 생성 실패: {}", url, e);
+            log.error("자소서 생성 실패: {}", jobPosting.getUrl(), e);
             throw e;
         }
     }
