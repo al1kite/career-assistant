@@ -2,6 +2,7 @@ package com.career.assistant.api;
 
 import com.career.assistant.api.dto.CreateExperienceRequest;
 import com.career.assistant.api.dto.ExperienceResponse;
+import com.career.assistant.application.ExperienceEmbeddingService;
 import com.career.assistant.domain.experience.ExperienceCategory;
 import com.career.assistant.domain.experience.UserExperience;
 import com.career.assistant.domain.experience.UserExperienceRepository;
@@ -22,6 +23,7 @@ import java.util.List;
 public class UserExperienceController {
 
     private final UserExperienceRepository userExperienceRepository;
+    private final ExperienceEmbeddingService experienceEmbeddingService;
 
     @Operation(summary = "경험 전체 조회")
     @GetMapping
@@ -49,6 +51,7 @@ public class UserExperienceController {
             request.skills(), request.period()
         );
         userExperienceRepository.save(experience);
+        experienceEmbeddingService.indexExperience(experience);
         return ResponseEntity
             .created(URI.create("/api/experiences/" + experience.getId()))
             .body(ExperienceResponse.from(experience));
@@ -60,6 +63,7 @@ public class UserExperienceController {
         if (!userExperienceRepository.existsById(id)) {
             return ResponseEntity.notFound().build();
         }
+        experienceEmbeddingService.removeExperience(id);
         userExperienceRepository.deleteById(id);
         return ResponseEntity.noContent().build();
     }

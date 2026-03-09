@@ -35,6 +35,7 @@ public class CoverLetterFacade {
     private final JobPostingRepository jobPostingRepository;
     private final CoverLetterRepository coverLetterRepository;
     private final UserExperienceRepository userExperienceRepository;
+    private final ExperienceEmbeddingService experienceEmbeddingService;
     private final JsoupCrawler jsoupCrawler;
     private final CompanyClassifier companyClassifier;
     private final CompanyAnalyzer companyAnalyzer;
@@ -115,12 +116,14 @@ public class CoverLetterFacade {
     }
 
     private List<CoverLetter> generateCoverLetters(JobPosting jobPosting, List<EssayQuestion> essayQuestions) {
-        List<UserExperience> experiences = userExperienceRepository.findAll();
         AiPort ai = aiRouter.route(jobPosting.getCompanyType());
 
         jobPosting.markReviewing();
 
         if (essayQuestions == null || essayQuestions.isEmpty()) {
+            List<UserExperience> experiences = retrieveExperiencesOrFallback(jobPosting, null);
+            log.info("[RAG] 검색된 경험 {}건 (단일 자소서)", experiences.size());
+
             String prompt = promptBuilder.build(jobPosting, experiences);
             String content = ai.generate(prompt);
 
@@ -139,6 +142,9 @@ public class CoverLetterFacade {
 
         List<CoverLetter> finalLetters = new ArrayList<>();
         for (EssayQuestion question : essayQuestions) {
+            List<UserExperience> experiences = retrieveExperiencesOrFallback(jobPosting, question.questionText());
+            log.info("[RAG] 문항 {} 검색된 경험 {}건", question.number(), experiences.size());
+
             String prompt = promptBuilder.buildForQuestion(jobPosting, experiences, question);
             String content = ai.generate(prompt);
 
@@ -264,6 +270,35 @@ public class CoverLetterFacade {
             case "experienceConsistency" -> "제공된 경험 목록에 없는 프로젝트나 경력을 삭제하세요. 실제 경험만 정확히 인용하세요.";
             default -> "해당 항목의 점수를 높이기 위해 구체성과 관련성을 강화하세요.";
         };
+    }
+
+    private List<UserExperience> retrieveExperiencesOrFallback(JobPosting jobPosting, String questionText) {
+        try {
+            String query = buildRetrievalQuery(jobPosting, questionText);
+            return experienceEmbeddingService.retrieveRelevant(query);
+        } catch (Exception e) {
+            log.warn("[RAG] 벡터 검색 실패 — findAll 폴백: {}", e.getMessage());
+            return userExperienceRepository.findAll();
+        }
+    }
+
+    private String buildRetrievalQuery(JobPosting jobPosting, String questionText) {
+        StringBuilder sb = new StringBuilder();
+        if (jobPosting.getCompanyName() != null) {
+            sb.append(jobPosting.getCompanyName()).append(" ");
+        }
+        if (jobPosting.getJobDescription() != null) {
+            sb.append(jobPosting.getJobDescription(), 0,
+                Math.min(500, jobPosting.getJobDescription().length())).append(" ");
+        }
+        if (jobPosting.getRequirements() != null) {
+            sb.append(jobPosting.getRequirements(), 0,
+                Math.min(300, jobPosting.getRequirements().length())).append(" ");
+        }
+        if (questionText != null) {
+            sb.append(questionText);
+        }
+        return sb.toString().trim();
     }
 
     private LocalDate parseDeadline(String deadline) {
