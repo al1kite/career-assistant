@@ -62,8 +62,7 @@ public class OnnxEmbeddingService {
         try (Predictor<String, float[]> predictor = model.newPredictor()) {
             return predictor.predict(text);
         } catch (TranslateException e) {
-            String preview = text.substring(0, Math.min(50, text.length()));
-            throw new RuntimeException("텍스트 임베딩 실패: " + preview, e);
+            throw new RuntimeException("텍스트 임베딩 실패 (길이: " + text.length() + ")", e);
         }
     }
 }
