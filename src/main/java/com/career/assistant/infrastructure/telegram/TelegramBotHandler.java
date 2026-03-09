@@ -1,6 +1,9 @@
 package com.career.assistant.infrastructure.telegram;
 
 import com.career.assistant.application.CoverLetterFacade;
+import com.career.assistant.application.interview.InterviewPrepAnalyzer;
+import com.career.assistant.application.interview.InterviewPrepMessageFormatter;
+import com.career.assistant.application.interview.InterviewPrepResult;
 import com.career.assistant.application.jobcollector.JobCollectorService;
 import com.career.assistant.application.kpt.KptMessageFormatter;
 import com.career.assistant.domain.coverletter.CoverLetter;
@@ -36,6 +39,8 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
     private final JobCollectorService jobCollectorService;
     private final KptMessageFormatter kptMessageFormatter;
     private final KptRecordRepository kptRecordRepository;
+    private final InterviewPrepAnalyzer interviewPrepAnalyzer;
+    private final InterviewPrepMessageFormatter interviewPrepMessageFormatter;
     private final ObjectMapper objectMapper;
     private final String chatId;
 
@@ -46,6 +51,8 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
         JobCollectorService jobCollectorService,
         KptMessageFormatter kptMessageFormatter,
         KptRecordRepository kptRecordRepository,
+        InterviewPrepAnalyzer interviewPrepAnalyzer,
+        InterviewPrepMessageFormatter interviewPrepMessageFormatter,
         ObjectMapper objectMapper,
         @Value("${telegram.bot-token}") String botToken,
         @Value("${telegram.chat-id}") String chatId
@@ -57,6 +64,8 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
         this.jobCollectorService = jobCollectorService;
         this.kptMessageFormatter = kptMessageFormatter;
         this.kptRecordRepository = kptRecordRepository;
+        this.interviewPrepAnalyzer = interviewPrepAnalyzer;
+        this.interviewPrepMessageFormatter = interviewPrepMessageFormatter;
         this.objectMapper = objectMapper;
         this.chatId = chatId;
     }
@@ -83,6 +92,8 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
                 handleJobListCommand();
             } else if (text.startsWith("/kpt")) {
                 handleKptCommand(text);
+            } else if (text.startsWith("/면접")) {
+                handleInterviewCommand(text);
             } else if (text.startsWith("/비교")) {
                 handleCompareCommand(text);
             } else if (text.startsWith("/기록")) {
@@ -116,6 +127,8 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
             + "  /기록 — 최근 자소서 요약 (최근 5개 회사)\n"
             + "  /기록 {회사명} — 해당 회사 문항별 점수\n"
             + "  /비교 {회사명} {문항번호} — 버전별 점수 변화 비교\n\n"
+            + "[면접 준비]\n"
+            + "  /면접 {회사명} — 면접 예상 질문 + 답변 가이드 생성\n\n"
             + "[KPT 회고]\n"
             + "  /kpt — 최근 7일 KPT 기록\n"
             + "  /kpt 주간 — 이번 주 KPT 요약 (달성률 추이)\n\n"
@@ -150,6 +163,47 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
         LocalDate weekStart = today.with(DayOfWeek.MONDAY);
         List<KptRecord> records = kptRecordRepository.findByDateBetweenOrderByDateDesc(weekStart, today);
         sendMessage(kptMessageFormatter.formatWeeklySummary(records));
+    }
+
+    // ── 면접 준비 ──────────────────────────────────────────
+
+    private void handleInterviewCommand(String text) {
+        String companyName = text.replaceFirst("/면접", "").trim();
+
+        if (companyName.isEmpty()) {
+            sendMessage("사용법: /면접 {회사명}\n예: /면접 카카오");
+            return;
+        }
+
+        List<JobPosting> matched = jobPostingRepository.findByCompanyNameContaining(companyName);
+        if (matched.isEmpty()) {
+            sendMessage("'%s' 회사의 공고를 찾을 수 없습니다.\n채용공고 URL을 먼저 보내 자소서를 생성해주세요.".formatted(companyName));
+            return;
+        }
+
+        // 분석 데이터가 있는 공고 우선, 없으면 최신 공고
+        JobPosting jobPosting = matched.stream()
+            .filter(jp -> jp.getCompanyAnalysis() != null && !jp.getCompanyAnalysis().isBlank())
+            .max(java.util.Comparator.comparing(JobPosting::getCreatedAt))
+            .orElseGet(() -> matched.stream()
+                .max(java.util.Comparator.comparing(JobPosting::getCreatedAt))
+                .orElse(matched.get(0)));
+
+        if (jobPosting.getCompanyAnalysis() == null || jobPosting.getCompanyAnalysis().isBlank()) {
+            sendMessage("'%s' 회사의 분석 데이터가 없습니다.\n채용공고 URL을 먼저 보내 자소서를 생성해주세요.".formatted(jobPosting.getCompanyName()));
+            return;
+        }
+
+        sendMessage("면접 예상 질문 생성 중... (회사 분석 기반)");
+
+        try {
+            InterviewPrepResult result = interviewPrepAnalyzer.analyze(jobPosting);
+            String message = interviewPrepMessageFormatter.format(jobPosting.getCompanyName(), result);
+            sendMessage(message);
+        } catch (Exception e) {
+            log.error("면접 준비 생성 실패 - {}", jobPosting.getCompanyName(), e);
+            sendMessage("면접 준비 가이드 생성에 실패했습니다: " + e.getMessage());
+        }
     }
 
     // ── 자소서 ──────────────────────────────────────────
