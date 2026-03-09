@@ -2,18 +2,24 @@ package com.career.assistant.infrastructure.embedding;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class LocalVectorStore {
 
     private static final Path STORE_PATH = Path.of("./data/experience-vectors.json");
@@ -21,8 +27,8 @@ public class LocalVectorStore {
     private final Map<Long, float[]> vectors = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
 
-    public LocalVectorStore(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
+    @PostConstruct
+    void init() {
         load();
     }
 
