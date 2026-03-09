@@ -16,6 +16,13 @@ import java.util.stream.Collectors;
 @Component
 public class CoverLetterPromptBuilder {
 
+    private static final String EXPERIENCE_GROUNDING_RULES = """
+            [경험 사용 규칙 — 절대 위반 금지]
+            아래 [지원자 경험]에 제공된 경험만 사용하세요.
+            제공되지 않은 프로젝트, 회사, 수상 경력, 활동을 절대 지어내지 마세요.
+            경험의 제목, 기간, 기술스택, 성과 수치를 있는 그대로 인용하세요.
+            없는 경험을 쓰면 즉시 탈락입니다.""";
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public String build(JobPosting jobPosting, List<UserExperience> experiences) {
@@ -91,11 +98,7 @@ public class CoverLetterPromptBuilder {
             5. 감정 동사: "짜릿했습니다", "억울했습니다", "오기가 생겼습니다" 최소 2회
             6. 비정형 숫자: "정확히 47일", "2.3배", "새벽 4시 17분"
 
-            [경험 사용 규칙 — 절대 위반 금지]
-            아래 [지원자 경험]에 제공된 경험만 사용하세요.
-            제공되지 않은 프로젝트, 회사, 수상 경력, 활동을 절대 지어내지 마세요.
-            경험의 제목, 기간, 기술스택, 성과 수치를 있는 그대로 인용하세요.
-            없는 경험을 쓰면 즉시 탈락입니다.
+            %s
 
             [톤]
             %s
@@ -108,6 +111,7 @@ public class CoverLetterPromptBuilder {
             [지원자 경험]
             %s""".formatted(
                 companyAnalysis,
+                EXPERIENCE_GROUNDING_RULES,
                 tone,
                 jobPosting.getCompanyName(),
                 jobPosting.getJobDescription(),
@@ -188,11 +192,7 @@ public class CoverLetterPromptBuilder {
             5. 감정 동사: "짜릿했습니다", "억울했습니다", "오기가 생겼습니다" 최소 2회
             6. 비정형 숫자: "정확히 47일", "2.3배", "새벽 4시 17분"
 
-            [경험 사용 규칙 — 절대 위반 금지]
-            아래 [지원자 경험]에 제공된 경험만 사용하세요.
-            제공되지 않은 프로젝트, 회사, 수상 경력, 활동을 절대 지어내지 마세요.
-            경험의 제목, 기간, 기술스택, 성과 수치를 있는 그대로 인용하세요.
-            없는 경험을 쓰면 즉시 탈락입니다.
+            %s
 
             [톤]
             %s
@@ -211,6 +211,7 @@ public class CoverLetterPromptBuilder {
                 questionGuide.isBlank() ? "(분석 데이터 없음 — 채용공고에서 직접 파악하세요)" : questionGuide,
                 questionType,
                 typeGuide,
+                EXPERIENCE_GROUNDING_RULES,
                 tone,
                 jobPosting.getCompanyName(),
                 jobPosting.getJobDescription(),
@@ -288,11 +289,7 @@ public class CoverLetterPromptBuilder {
             직무설명: %s
             자격요건: %s
 
-            [경험 사용 규칙 — 절대 위반 금지]
-            아래 [지원자 경험]에 제공된 경험만 사용하세요.
-            제공되지 않은 프로젝트, 회사, 수상 경력, 활동을 절대 지어내지 마세요.
-            경험의 제목, 기간, 기술스택, 성과 수치를 있는 그대로 인용하세요.
-            없는 경험을 쓰면 즉시 탈락입니다.
+            %s
 
             [지원자 경험]
             %s
@@ -307,6 +304,7 @@ public class CoverLetterPromptBuilder {
                 jobPosting.getCompanyName(),
                 jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "",
                 jobPosting.getRequirements() != null ? jobPosting.getRequirements() : "",
+                EXPERIENCE_GROUNDING_RULES,
                 experienceSummary
             );
     }
