@@ -47,10 +47,6 @@ public record ReviewResult(
         return "D";
     }
 
-    public boolean passThreshold() {
-        return totalScore >= 85;
-    }
-
     /**
      * 8개 항목 중 점수가 낮은 순으로 topN개 반환.
      * aiDetectionRisk는 반전(100-risk)하여 비교.
