@@ -31,7 +31,7 @@ public class CoverLetterFacade {
 
     private static final int MAX_ITERATIONS = 3;
     private static final int MIN_ITERATIONS = 2;
-    private static final int QUALITY_THRESHOLD = 92;
+    private static final String QUALITY_GRADE = "A";
 
     private final JobPostingRepository jobPostingRepository;
     private final CoverLetterRepository coverLetterRepository;
@@ -182,7 +182,11 @@ public class CoverLetterFacade {
             try {
                 review = reviewAgent.review(currentDraft, jobPosting, questionText, iteration, experiences);
             } catch (Exception e) {
-                log.error("[에이전트] 검토 중 API 오류, 현재 버전을 최종으로 저장: {}", e.getMessage());
+                log.error("[에이전트] {}차 검토 중 API 오류: {}", iteration, e.getMessage());
+                if (iteration < MIN_ITERATIONS) {
+                    log.warn("[에이전트] 최소 반복 미달 ({}/{}) — 다음 반복에서 재시도", iteration, MIN_ITERATIONS);
+                    continue;
+                }
                 break;
             }
 
@@ -194,14 +198,14 @@ public class CoverLetterFacade {
                 iteration, review.totalScore(), review.grade(),
                 review.violations().size(), review.improvements().size());
 
-            // 품질 임계값 통과 (최소 반복 횟수 이후에만 적용)
-            if (iteration >= MIN_ITERATIONS && review.totalScore() >= QUALITY_THRESHOLD) {
-                log.info("[에이전트] 품질 기준 통과! ({}점 >= {}점, {}회 반복)", review.totalScore(), QUALITY_THRESHOLD, iteration);
+            // 품질 등급 통과 (최소 반복 횟수 이후에만 적용)
+            if (iteration >= MIN_ITERATIONS && passesQualityGrade(review.grade())) {
+                log.info("[에이전트] 품질 기준 통과! ({}등급, {}회 반복)", review.grade(), iteration);
                 break;
             }
-            if (iteration < MIN_ITERATIONS && review.totalScore() >= QUALITY_THRESHOLD) {
-                log.info("[에이전트] 품질 기준 통과했으나 최소 반복 미달 ({}/{}회) — 추가 개선 진행",
-                    iteration, MIN_ITERATIONS);
+            if (iteration < MIN_ITERATIONS && passesQualityGrade(review.grade())) {
+                log.info("[에이전트] {}등급 도달했으나 최소 반복 미달 ({}/{}) — 추가 개선 진행",
+                    review.grade(), iteration, MIN_ITERATIONS);
             }
 
             // 마지막 반복이면 더 이상 개선하지 않음
@@ -231,12 +235,20 @@ public class CoverLetterFacade {
                 currentDraft = improvedContent;
                 latest = newVersion;
             } catch (Exception e) {
-                log.error("[에이전트] 개선 중 API 오류, 현재 버전을 최종으로 저장: {}", e.getMessage());
+                log.error("[에이전트] {}차 개선 중 API 오류: {}", iteration, e.getMessage());
+                if (iteration < MIN_ITERATIONS) {
+                    log.warn("[에이전트] 최소 반복 미달 ({}/{}) — 동일 초안으로 다음 검토 재시도", iteration, MIN_ITERATIONS);
+                    continue;
+                }
                 break;
             }
         }
 
         return latest;
+    }
+
+    private boolean passesQualityGrade(String grade) {
+        return QUALITY_GRADE.equals(grade) || "S".equals(grade);
     }
 
     String buildTargetedStrategy(ReviewResult review) {
