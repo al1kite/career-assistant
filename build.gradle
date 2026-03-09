@@ -44,6 +44,12 @@ dependencies {
     // HTTP Client (Claude/GPT API 호출)
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
 
+    // DJL ONNX 임베딩 (로컬, 무료)
+    implementation platform('ai.djl:bom:0.31.1')
+    implementation 'ai.djl:api'
+    implementation 'ai.djl.onnxruntime:onnxruntime-engine'
+    implementation 'ai.djl.huggingface:tokenizers'
+
     // Lombok
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
