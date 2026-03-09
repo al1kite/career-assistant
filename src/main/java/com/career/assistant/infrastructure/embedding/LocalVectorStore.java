@@ -3,8 +3,8 @@ package com.career.assistant.infrastructure.embedding;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -14,18 +14,23 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class LocalVectorStore {
-
-    private static final Path STORE_PATH = Path.of("./data/experience-vectors.json");
 
     private final Map<Long, float[]> vectors = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
+    private final Path storePath;
+
+    public LocalVectorStore(ObjectMapper objectMapper,
+                            @Value("${vector.store.path:./data/experience-vectors.json}") String storePath) {
+        this.objectMapper = objectMapper;
+        this.storePath = Path.of(storePath);
+    }
 
     @PostConstruct
     void init() {
@@ -34,16 +39,28 @@ public class LocalVectorStore {
 
     public void put(long id, float[] vector) {
         vectors.put(id, vector);
-        save();
+        persistToFile();
     }
 
     public void remove(long id) {
         vectors.remove(id);
-        save();
+        persistToFile();
     }
 
-    public void clear() {
+    /**
+     * 배치 삽입 — save()를 마지막에 1회만 호출한다.
+     */
+    public void putAll(Map<Long, float[]> entries) {
+        vectors.putAll(entries);
+        persistToFile();
+    }
+
+    /**
+     * 벡터 스토어를 비우고 즉시 영속화한다.
+     */
+    public void clearAndSave() {
         vectors.clear();
+        persistToFile();
     }
 
     public boolean isEmpty() {
@@ -54,8 +71,8 @@ public class LocalVectorStore {
         return vectors.size();
     }
 
-    public boolean contains(long id) {
-        return vectors.containsKey(id);
+    public Set<Long> ids() {
+        return Set.copyOf(vectors.keySet());
     }
 
     /**
@@ -87,29 +104,29 @@ public class LocalVectorStore {
         return denom == 0.0 ? 0.0 : dot / denom;
     }
 
-    private void save() {
+    private synchronized void persistToFile() {
         try {
-            Files.createDirectories(STORE_PATH.getParent());
+            Files.createDirectories(storePath.getParent());
             Map<String, List<Float>> serializable = new LinkedHashMap<>();
             vectors.forEach((id, vec) -> {
                 List<Float> floatList = new ArrayList<>(vec.length);
                 for (float v : vec) floatList.add(v);
                 serializable.put(String.valueOf(id), floatList);
             });
-            objectMapper.writerWithDefaultPrettyPrinter().writeValue(STORE_PATH.toFile(), serializable);
+            objectMapper.writerWithDefaultPrettyPrinter().writeValue(storePath.toFile(), serializable);
         } catch (IOException e) {
             log.warn("[벡터] JSON 저장 실패: {}", e.getMessage());
         }
     }
 
     private void load() {
-        if (!Files.exists(STORE_PATH)) {
+        if (!Files.exists(storePath)) {
             log.info("[벡터] 저장 파일 없음 — 빈 스토어로 시작");
             return;
         }
         try {
             Map<String, List<Float>> loaded = objectMapper.readValue(
-                STORE_PATH.toFile(),
+                storePath.toFile(),
                 new TypeReference<>() {}
             );
             loaded.forEach((idStr, floatList) -> {

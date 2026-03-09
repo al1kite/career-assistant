@@ -56,10 +56,14 @@ public class OnnxEmbeddingService {
         if (model == null) {
             throw new IllegalStateException("임베딩 모델이 로드되지 않았습니다.");
         }
+        if (text == null || text.isBlank()) {
+            throw new IllegalArgumentException("임베딩 대상 텍스트가 비어있습니다.");
+        }
         try (Predictor<String, float[]> predictor = model.newPredictor()) {
             return predictor.predict(text);
         } catch (TranslateException e) {
-            throw new RuntimeException("텍스트 임베딩 실패: " + text.substring(0, Math.min(50, text.length())), e);
+            String preview = text.substring(0, Math.min(50, text.length()));
+            throw new RuntimeException("텍스트 임베딩 실패: " + preview, e);
         }
     }
 }
