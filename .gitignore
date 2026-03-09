@@ -16,3 +16,6 @@ Thumbs.db
 
 # Sensitive config
 src/main/resources/application.yml
+
+# Vector store data
+data/
