@@ -22,7 +22,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -44,6 +46,47 @@ public class CoverLetterFacade {
     private final AiRouter aiRouter;
     private final ObjectMapper objectMapper;
     private final ReviewAgent reviewAgent;
+
+    public static Map<Integer, CoverLetter> extractLatestByQuestion(List<CoverLetter> letters) {
+        Map<Integer, CoverLetter> latest = new LinkedHashMap<>();
+        for (CoverLetter cl : letters) {
+            int qIdx = cl.getQuestionIndex() != null ? cl.getQuestionIndex() : 0;
+            CoverLetter existing = latest.get(qIdx);
+            if (existing == null || cl.getVersion() > existing.getVersion()) {
+                latest.put(qIdx, cl);
+            }
+        }
+        return latest;
+    }
+
+    @Transactional
+    public List<CoverLetter> improveExisting(Long jobPostingId) {
+        JobPosting jp = jobPostingRepository.findById(jobPostingId)
+            .orElseThrow(() -> new IllegalArgumentException("공고를 찾을 수 없습니다: " + jobPostingId));
+        List<CoverLetter> allLetters = coverLetterRepository.findByJobPostingId(jobPostingId);
+        if (allLetters.isEmpty()) {
+            throw new IllegalStateException("개선할 자소서가 없습니다");
+        }
+
+        Map<Integer, CoverLetter> latestByQuestion = extractLatestByQuestion(allLetters);
+        AiPort ai = aiRouter.route(jp.getCompanyType());
+        List<CoverLetter> results = new ArrayList<>();
+
+        log.info("[개선] 기존 자소서 추가 개선 시작 - 회사: {}, 문항 {}개", jp.getCompanyName(), latestByQuestion.size());
+
+        for (CoverLetter latest : latestByQuestion.values()) {
+            List<UserExperience> experiences = retrieveExperiencesOrFallback(jp, latest.getQuestionText());
+            CoverLetter improved = generateWithReviewLoop(
+                latest, jp, experiences, ai, latest.getQuestionText(), null);
+            results.add(improved);
+
+            log.info("[개선] 문항 {} 개선 완료 - v{} → v{}, 점수: {}",
+                latest.getQuestionIndex(), latest.getVersion(), improved.getVersion(), improved.getReviewScore());
+        }
+
+        log.info("[개선] 추가 개선 완료 - 회사: {}, 문항 {}개", jp.getCompanyName(), results.size());
+        return results;
+    }
 
     @Transactional
     public List<CoverLetter> generateFromUrl(String url) {
