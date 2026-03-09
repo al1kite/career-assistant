@@ -29,7 +29,7 @@ import java.util.List;
 public class CoverLetterFacade {
 
     private static final int MAX_ITERATIONS = 3;
-    private static final int QUALITY_THRESHOLD = 85;
+    private static final int QUALITY_THRESHOLD = 92;
 
     private final JobPostingRepository jobPostingRepository;
     private final CoverLetterRepository coverLetterRepository;

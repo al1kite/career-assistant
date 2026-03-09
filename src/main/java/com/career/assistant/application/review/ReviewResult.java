@@ -48,7 +48,7 @@ public record ReviewResult(
     }
 
     public boolean passThreshold() {
-        return totalScore >= 85;
+        return totalScore >= 92;
     }
 
     /**
