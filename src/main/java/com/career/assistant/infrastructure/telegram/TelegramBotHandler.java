@@ -94,6 +94,8 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
                 handleKptCommand(text);
             } else if (text.startsWith("/면접")) {
                 handleInterviewCommand(text);
+            } else if (text.startsWith("/개선")) {
+                handleImproveCommand(text);
             } else if (text.startsWith("/비교")) {
                 handleCompareCommand(text);
             } else if (text.startsWith("/기록")) {
@@ -126,7 +128,8 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
             + "[자소서]\n"
             + "  /기록 — 최근 자소서 요약 (최근 5개 회사)\n"
             + "  /기록 {회사명} — 해당 회사 문항별 점수\n"
-            + "  /비교 {회사명} {문항번호} — 버전별 점수 변화 비교\n\n"
+            + "  /비교 {회사명} {문항번호} — 버전별 점수 변화 비교\n"
+            + "  /개선 {회사명} — 기존 자소서 추가 개선 (리뷰+개선 재실행)\n\n"
             + "[면접 준비]\n"
             + "  /면접 {회사명} — 면접 예상 질문 + 답변 가이드 생성\n\n"
             + "[KPT 회고]\n"
@@ -209,9 +212,21 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
     // ── 자소서 ──────────────────────────────────────────
 
     private void handleJobUrl(String url) {
-        sendMessage("공고를 크롤링 중입니다...");
-        sendMessage("회사를 AI로 심층 분석 중입니다... (경쟁사, 채용 배경, 문항별 작성 전략 등)");
-        sendMessage("분석 완료 후 자소서를 생성합니다. AI 에이전트가 생성 → 검토 → 개선을 반복합니다. 잠시만 기다려주세요.");
+        String companyName = null;
+        JobPosting existing = jobPostingRepository.findByUrl(url).orElse(null);
+        if (existing != null && !existing.needsCrawling()) {
+            List<CoverLetter> existingLetters = coverLetterRepository.findByJobPostingId(existing.getId());
+            if (!existingLetters.isEmpty()) {
+                companyName = existing.getCompanyName();
+            }
+        }
+
+        if (companyName == null) {
+            sendMessage("공고를 크롤링 중입니다...");
+            sendMessage("회사를 AI로 심층 분석 중입니다... (경쟁사, 채용 배경, 문항별 작성 전략 등)");
+            sendMessage("분석 완료 후 자소서를 생성합니다. AI 에이전트가 생성 → 검토 → 개선을 반복합니다. 잠시만 기다려주세요.");
+        }
+
         try {
             List<CoverLetter> coverLetters = coverLetterFacade.generateFromUrl(url);
             if (coverLetters.size() == 1) {
@@ -231,9 +246,68 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
                 }
                 sendMessage(sb.toString());
             }
+
+            if (companyName != null) {
+                sendMessage("이미 생성된 자소서입니다. 추가 개선을 원하시면 /개선 %s 을 입력하세요.".formatted(companyName));
+            }
         } catch (Exception e) {
             log.error("자소서 생성 실패", e);
             sendMessage("공고 분석에 실패했습니다. URL을 확인해주세요.\n" + e.getMessage());
+        }
+    }
+
+    private void handleImproveCommand(String text) {
+        String companyName = text.replaceFirst("/개선", "").trim();
+
+        if (companyName.isEmpty()) {
+            sendMessage("사용법: /개선 {회사명}\n예: /개선 카카오");
+            return;
+        }
+
+        List<JobPosting> matched = jobPostingRepository.findByCompanyNameContaining(companyName);
+        if (matched.isEmpty()) {
+            sendMessage("'%s' 회사의 공고를 찾을 수 없습니다.".formatted(companyName));
+            return;
+        }
+
+        JobPosting jp = matched.stream()
+            .max(java.util.Comparator.comparing(JobPosting::getCreatedAt))
+            .orElse(matched.get(0));
+
+        List<CoverLetter> existing = coverLetterRepository.findByJobPostingId(jp.getId());
+        if (existing.isEmpty()) {
+            sendMessage("'%s' 자소서가 아직 생성되지 않았습니다. 채용공고 URL을 먼저 보내주세요.".formatted(jp.getCompanyName()));
+            return;
+        }
+
+        Map<Integer, CoverLetter> beforeLatest = CoverLetterFacade.extractLatestByQuestion(existing);
+        Map<Integer, Integer> beforeScores = new LinkedHashMap<>();
+        for (var entry : beforeLatest.entrySet()) {
+            beforeScores.put(entry.getKey(), entry.getValue().getReviewScore() != null ? entry.getValue().getReviewScore() : 0);
+        }
+
+        sendMessage("'%s' 자소서 추가 개선을 시작합니다. AI 에이전트가 검토 → 개선을 반복합니다...".formatted(jp.getCompanyName()));
+
+        try {
+            List<CoverLetter> improved = coverLetterFacade.improveExisting(jp.getId());
+
+            StringBuilder sb = new StringBuilder("'%s' 자소서 개선 완료!\n\n".formatted(jp.getCompanyName()));
+            for (CoverLetter cl : improved) {
+                int qIdx = cl.getQuestionIndex() != null ? cl.getQuestionIndex() : 0;
+                int before = beforeScores.getOrDefault(qIdx, 0);
+                int after = cl.getReviewScore() != null ? cl.getReviewScore() : 0;
+                int diff = after - before;
+                String arrow = diff > 0 ? "+" + diff : String.valueOf(diff);
+                String qText = cl.getQuestionText() != null ? cl.getQuestionText() : "(단일 문항)";
+                if (qText.length() > 30) qText = qText.substring(0, 30) + "...";
+
+                sb.append("문항%d: %s\n".formatted(qIdx, qText));
+                sb.append("  %d점 → %d점 (%s) | v%d\n\n".formatted(before, after, arrow, cl.getVersion()));
+            }
+            sendMessage(sb.toString());
+        } catch (Exception e) {
+            log.error("자소서 개선 실패 - {}", jp.getCompanyName(), e);
+            sendMessage("자소서 개선에 실패했습니다: " + e.getMessage());
         }
     }
 
@@ -390,15 +464,7 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
     // ── 공통 유틸 ──────────────────────────────────────────
 
     private static Map<Integer, CoverLetter> extractLatestByQuestion(List<CoverLetter> letters) {
-        Map<Integer, CoverLetter> latest = new LinkedHashMap<>();
-        for (CoverLetter cl : letters) {
-            int qIdx = cl.getQuestionIndex() != null ? cl.getQuestionIndex() : 0;
-            CoverLetter existing = latest.get(qIdx);
-            if (existing == null || cl.getVersion() > existing.getVersion()) {
-                latest.put(qIdx, cl);
-            }
-        }
-        return latest;
+        return CoverLetterFacade.extractLatestByQuestion(letters);
     }
 
     private String formatScoreInfo(CoverLetter cl) {

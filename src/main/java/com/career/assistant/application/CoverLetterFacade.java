@@ -22,7 +22,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -44,6 +46,47 @@ public class CoverLetterFacade {
     private final AiRouter aiRouter;
     private final ObjectMapper objectMapper;
     private final ReviewAgent reviewAgent;
+
+    public static Map<Integer, CoverLetter> extractLatestByQuestion(List<CoverLetter> letters) {
+        Map<Integer, CoverLetter> latest = new LinkedHashMap<>();
+        for (CoverLetter cl : letters) {
+            int qIdx = cl.getQuestionIndex() != null ? cl.getQuestionIndex() : 0;
+            CoverLetter existing = latest.get(qIdx);
+            if (existing == null || cl.getVersion() > existing.getVersion()) {
+                latest.put(qIdx, cl);
+            }
+        }
+        return latest;
+    }
+
+    @Transactional
+    public List<CoverLetter> improveExisting(Long jobPostingId) {
+        JobPosting jp = jobPostingRepository.findById(jobPostingId)
+            .orElseThrow(() -> new IllegalArgumentException("공고를 찾을 수 없습니다: " + jobPostingId));
+        List<CoverLetter> allLetters = coverLetterRepository.findByJobPostingId(jobPostingId);
+        if (allLetters.isEmpty()) {
+            throw new IllegalStateException("개선할 자소서가 없습니다");
+        }
+
+        Map<Integer, CoverLetter> latestByQuestion = extractLatestByQuestion(allLetters);
+        AiPort ai = aiRouter.route(jp.getCompanyType());
+        List<CoverLetter> results = new ArrayList<>();
+
+        log.info("[개선] 기존 자소서 추가 개선 시작 - 회사: {}, 문항 {}개", jp.getCompanyName(), latestByQuestion.size());
+
+        for (CoverLetter latest : latestByQuestion.values()) {
+            List<UserExperience> experiences = retrieveExperiencesOrFallback(jp, latest.getQuestionText());
+            CoverLetter improved = generateWithReviewLoop(
+                latest, jp, experiences, ai, latest.getQuestionText(), null);
+            results.add(improved);
+
+            log.info("[개선] 문항 {} 개선 완료 - v{} → v{}, 점수: {}",
+                latest.getQuestionIndex(), latest.getVersion(), improved.getVersion(), improved.getReviewScore());
+        }
+
+        log.info("[개선] 추가 개선 완료 - 회사: {}, 문항 {}개", jp.getCompanyName(), results.size());
+        return results;
+    }
 
     @Transactional
     public List<CoverLetter> generateFromUrl(String url) {
@@ -177,6 +220,8 @@ public class CoverLetterFacade {
                                                 String questionText, EssayQuestion essayQuestion) {
         String currentDraft = currentLetter.getContent();
         CoverLetter latest = currentLetter;
+        CoverLetter bestLetter = currentLetter;
+        int bestScore = -1;
 
         for (int iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
             log.info("[에이전트] v{} → {}차 검토 시작 (문항: {})",
@@ -204,6 +249,15 @@ public class CoverLetterFacade {
                 iteration, review.totalScore(), review.grade(),
                 review.violations().size(), review.improvements().size());
 
+            // 최고 점수 버전 추적
+            if (review.totalScore() > bestScore) {
+                bestScore = review.totalScore();
+                bestLetter = latest;
+            } else {
+                log.warn("[에이전트] 점수 하락 감지 ({}점 → {}점) — 최고 버전: v{}({}점)",
+                    bestScore, review.totalScore(), bestLetter.getVersion(), bestScore);
+            }
+
             // 품질 등급 통과 (최소 반복 횟수 이후에만 적용)
             if (iteration >= MIN_ITERATIONS && passesQualityGrade(review.grade())) {
                 log.info("[에이전트] 품질 기준 통과! ({}등급, {}회 반복)", review.grade(), iteration);
@@ -216,7 +270,8 @@ public class CoverLetterFacade {
 
             // 마지막 반복이면 더 이상 개선하지 않음
             if (iteration == MAX_ITERATIONS) {
-                log.info("[에이전트] 최대 반복 횟수 도달 ({}회), 현재 버전으로 확정", MAX_ITERATIONS);
+                log.info("[에이전트] 최대 반복 횟수 도달 ({}회), 최고 버전(v{}, {}점)으로 확정",
+                    MAX_ITERATIONS, bestLetter.getVersion(), bestScore);
                 break;
             }
 
@@ -250,7 +305,21 @@ public class CoverLetterFacade {
             }
         }
 
-        return latest;
+        // DB 최신 버전과 최고 점수 버전 일치 보장
+        if (bestLetter != latest && bestScore > 0) {
+            log.info("[에이전트] 최고 점수 버전(v{}, {}점)을 최종 버전(v{})으로 확정",
+                bestLetter.getVersion(), bestScore, latest.getVersion() + 1);
+            CoverLetter finalVersion = CoverLetter.ofVersion(
+                jobPosting, ai.getModelName(), bestLetter.getContent(),
+                latest.getVersion() + 1,
+                bestLetter.getQuestionIndex(), bestLetter.getQuestionText()
+            );
+            finalVersion.addReview(bestLetter.getFeedback(), bestScore);
+            coverLetterRepository.save(finalVersion);
+            return finalVersion;
+        }
+
+        return bestLetter;
     }
 
     private boolean passesQualityGrade(String grade) {
