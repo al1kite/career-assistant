@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,10 +49,18 @@ public class LocalVectorStore {
     }
 
     /**
-     * 배치 삽입 — save()를 마지막에 1회만 호출한다.
+     * 배치 삽입 — persistToFile()을 마지막에 1회만 호출한다.
      */
     public void putAll(Map<Long, float[]> entries) {
         vectors.putAll(entries);
+        persistToFile();
+    }
+
+    /**
+     * 배치 삭제 — persistToFile()을 마지막에 1회만 호출한다.
+     */
+    public void removeAll(Set<Long> ids) {
+        ids.forEach(vectors::remove);
         persistToFile();
     }
 
@@ -113,7 +122,9 @@ public class LocalVectorStore {
                 for (float v : vec) floatList.add(v);
                 serializable.put(String.valueOf(id), floatList);
             });
-            objectMapper.writerWithDefaultPrettyPrinter().writeValue(storePath.toFile(), serializable);
+            Path tempFile = storePath.resolveSibling(storePath.getFileName() + ".tmp");
+            objectMapper.writerWithDefaultPrettyPrinter().writeValue(tempFile.toFile(), serializable);
+            Files.move(tempFile, storePath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
             log.warn("[벡터] JSON 저장 실패: {}", e.getMessage());
         }

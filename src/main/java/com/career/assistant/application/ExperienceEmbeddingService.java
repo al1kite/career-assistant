@@ -33,7 +33,11 @@ public class ExperienceEmbeddingService {
             log.warn("[벡터] 임베딩 모델 비활성 — 벡터 검색 대신 전체 경험 사용");
             return;
         }
-        incrementalSync();
+        try {
+            incrementalSync();
+        } catch (Exception e) {
+            log.error("[벡터] 시작 시 동기화 실패 — 벡터 검색 없이 진행: {}", e.getMessage());
+        }
     }
 
     public List<UserExperience> retrieveRelevant(String query) {
@@ -46,33 +50,45 @@ public class ExperienceEmbeddingService {
             return userExperienceRepository.findAll();
         }
 
-        float[] queryVector = embeddingService.embed(query);
-        List<Long> ids = vectorStore.search(queryVector, topK);
+        try {
+            float[] queryVector = embeddingService.embed(query);
+            List<Long> ids = vectorStore.search(queryVector, topK);
 
-        if (ids.isEmpty()) {
+            if (ids.isEmpty()) {
+                return userExperienceRepository.findAll();
+            }
+
+            List<UserExperience> results = userExperienceRepository.findAllById(ids);
+
+            var idToExp = results.stream()
+                .collect(Collectors.toMap(UserExperience::getId, e -> e));
+            List<UserExperience> ordered = ids.stream()
+                .map(idToExp::get)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
+            log.info("[벡터] 쿼리에서 {}건 검색 (전체 {}건 중)", ordered.size(), vectorStore.size());
+            return ordered;
+        } catch (Exception e) {
+            log.warn("[벡터] 검색 실패 — findAll 폴백: {}", e.getMessage());
             return userExperienceRepository.findAll();
         }
-
-        List<UserExperience> results = userExperienceRepository.findAllById(ids);
-
-        // 검색 순서(유사도 내림차순) 유지
-        var idToExp = results.stream()
-            .collect(Collectors.toMap(UserExperience::getId, e -> e));
-        List<UserExperience> ordered = ids.stream()
-            .map(idToExp::get)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toList());
-
-        log.info("[벡터] 쿼리에서 {}건 검색 (전체 {}건 중)", ordered.size(), vectorStore.size());
-        return ordered;
     }
 
     public void indexExperience(UserExperience exp) {
         if (!embeddingService.isAvailable()) return;
-        String text = buildEmbeddingText(exp);
-        float[] vector = embeddingService.embed(text);
-        vectorStore.put(exp.getId(), vector);
-        log.info("[벡터] 경험 인덱싱: id={}, title={}", exp.getId(), exp.getTitle());
+        if (exp.getId() == null) {
+            log.warn("[벡터] 경험 ID가 null — 인덱싱 스킵");
+            return;
+        }
+        try {
+            String text = buildEmbeddingText(exp);
+            float[] vector = embeddingService.embed(text);
+            vectorStore.put(exp.getId(), vector);
+            log.info("[벡터] 경험 인덱싱: id={}", exp.getId());
+        } catch (Exception e) {
+            log.warn("[벡터] 경험 인덱싱 실패 (id={}): {}", exp.getId(), e.getMessage());
+        }
     }
 
     public void removeExperience(Long id) {
@@ -80,10 +96,6 @@ public class ExperienceEmbeddingService {
         log.info("[벡터] 경험 삭제: id={}", id);
     }
 
-    /**
-     * DB ID와 벡터 스토어 ID를 비교하여 변경분만 인덱싱한다.
-     * 추가된 경험만 임베딩하고, 삭제된 경험은 벡터에서 제거한다.
-     */
     private void incrementalSync() {
         List<UserExperience> allExperiences = userExperienceRepository.findAll();
         if (allExperiences.isEmpty()) {
@@ -99,11 +111,12 @@ public class ExperienceEmbeddingService {
             .collect(Collectors.toSet());
         Set<Long> storeIds = vectorStore.ids();
 
-        // 벡터에만 있고 DB에 없는 것 → 삭제
-        for (Long storeId : storeIds) {
-            if (!dbIds.contains(storeId)) {
-                vectorStore.remove(storeId);
-            }
+        // 벡터에만 있고 DB에 없는 것 → 배치 삭제
+        Set<Long> toRemove = storeIds.stream()
+            .filter(id -> !dbIds.contains(id))
+            .collect(Collectors.toSet());
+        if (!toRemove.isEmpty()) {
+            vectorStore.removeAll(toRemove);
         }
 
         // DB에만 있고 벡터에 없는 것 → 추가
@@ -118,12 +131,18 @@ public class ExperienceEmbeddingService {
 
         Map<Long, float[]> batch = new LinkedHashMap<>();
         for (UserExperience exp : toIndex) {
-            String text = buildEmbeddingText(exp);
-            float[] vector = embeddingService.embed(text);
-            batch.put(exp.getId(), vector);
+            try {
+                String text = buildEmbeddingText(exp);
+                float[] vector = embeddingService.embed(text);
+                batch.put(exp.getId(), vector);
+            } catch (Exception e) {
+                log.warn("[벡터] 경험 임베딩 실패 (id={}) — 스킵: {}", exp.getId(), e.getMessage());
+            }
         }
-        vectorStore.putAll(batch);
-        log.info("[벡터] 증분 동기화 완료 — 신규 {}건 추가 (전체 {}건)", toIndex.size(), vectorStore.size());
+        if (!batch.isEmpty()) {
+            vectorStore.putAll(batch);
+        }
+        log.info("[벡터] 증분 동기화 완료 — 신규 {}건 추가 (전체 {}건)", batch.size(), vectorStore.size());
     }
 
     public void reindexAll() {
@@ -136,13 +155,19 @@ public class ExperienceEmbeddingService {
 
         Map<Long, float[]> batch = new LinkedHashMap<>();
         for (UserExperience exp : all) {
-            String text = buildEmbeddingText(exp);
-            float[] vector = embeddingService.embed(text);
-            batch.put(exp.getId(), vector);
+            try {
+                String text = buildEmbeddingText(exp);
+                float[] vector = embeddingService.embed(text);
+                batch.put(exp.getId(), vector);
+            } catch (Exception e) {
+                log.warn("[벡터] 경험 임베딩 실패 (id={}) — 스킵: {}", exp.getId(), e.getMessage());
+            }
         }
         vectorStore.clearAndSave();
-        vectorStore.putAll(batch);
-        log.info("[벡터] 전체 경험 {}건 인덱싱 완료", all.size());
+        if (!batch.isEmpty()) {
+            vectorStore.putAll(batch);
+        }
+        log.info("[벡터] 전체 경험 {}건 인덱싱 완료 (실패 {}건 스킵)", batch.size(), all.size() - batch.size());
     }
 
     private String buildEmbeddingText(UserExperience exp) {

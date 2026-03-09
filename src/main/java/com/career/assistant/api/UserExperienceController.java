@@ -10,12 +10,14 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
 import java.util.List;
 
+@Slf4j
 @Tag(name = "User Experience", description = "사용자 경험/포트폴리오 관리 API")
 @RestController
 @RequestMapping("/api/experiences")
@@ -51,7 +53,11 @@ public class UserExperienceController {
             request.skills(), request.period()
         );
         userExperienceRepository.save(experience);
-        experienceEmbeddingService.indexExperience(experience);
+        try {
+            experienceEmbeddingService.indexExperience(experience);
+        } catch (Exception e) {
+            log.warn("[벡터] 경험 인덱싱 실패 — DB 저장은 완료: {}", e.getMessage());
+        }
         return ResponseEntity
             .created(URI.create("/api/experiences/" + experience.getId()))
             .body(ExperienceResponse.from(experience));
@@ -63,8 +69,12 @@ public class UserExperienceController {
         if (!userExperienceRepository.existsById(id)) {
             return ResponseEntity.notFound().build();
         }
-        experienceEmbeddingService.removeExperience(id);
         userExperienceRepository.deleteById(id);
+        try {
+            experienceEmbeddingService.removeExperience(id);
+        } catch (Exception e) {
+            log.warn("[벡터] 경험 벡터 삭제 실패 — DB 삭제는 완료: {}", e.getMessage());
+        }
         return ResponseEntity.noContent().build();
     }
 }
