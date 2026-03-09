@@ -30,6 +30,7 @@ import java.util.List;
 public class CoverLetterFacade {
 
     private static final int MAX_ITERATIONS = 3;
+    private static final int MIN_ITERATIONS = 2;
     private static final int QUALITY_THRESHOLD = 92;
 
     private final JobPostingRepository jobPostingRepository;
@@ -193,10 +194,14 @@ public class CoverLetterFacade {
                 iteration, review.totalScore(), review.grade(),
                 review.violations().size(), review.improvements().size());
 
-            // 품질 임계값 통과
-            if (review.totalScore() >= QUALITY_THRESHOLD) {
-                log.info("[에이전트] 품질 기준 통과! ({}점 >= {}점)", review.totalScore(), QUALITY_THRESHOLD);
+            // 품질 임계값 통과 (최소 반복 횟수 이후에만 적용)
+            if (iteration >= MIN_ITERATIONS && review.totalScore() >= QUALITY_THRESHOLD) {
+                log.info("[에이전트] 품질 기준 통과! ({}점 >= {}점, {}회 반복)", review.totalScore(), QUALITY_THRESHOLD, iteration);
                 break;
+            }
+            if (iteration < MIN_ITERATIONS && review.totalScore() >= QUALITY_THRESHOLD) {
+                log.info("[에이전트] 품질 기준 통과했으나 최소 반복 미달 ({}/{}회) — 추가 개선 진행",
+                    iteration, MIN_ITERATIONS);
             }
 
             // 마지막 반복이면 더 이상 개선하지 않음
