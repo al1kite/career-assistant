@@ -1,0 +1,142 @@
+package com.career.assistant.infrastructure.embedding;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
+
+@Slf4j
+@Component
+public class LocalVectorStore {
+
+    private final Map<Long, float[]> vectors = new ConcurrentHashMap<>();
+    private final ObjectMapper objectMapper;
+    private final Path storePath;
+
+    public LocalVectorStore(ObjectMapper objectMapper,
+                            @Value("${vector.store.path:./data/experience-vectors.json}") String storePath) {
+        this.objectMapper = objectMapper;
+        this.storePath = Path.of(storePath);
+    }
+
+    @PostConstruct
+    void init() {
+        load();
+    }
+
+    public void put(long id, float[] vector) {
+        vectors.put(id, vector);
+        persistToFile();
+    }
+
+    public void remove(long id) {
+        vectors.remove(id);
+        persistToFile();
+    }
+
+    /**
+     * 배치 삽입 — save()를 마지막에 1회만 호출한다.
+     */
+    public void putAll(Map<Long, float[]> entries) {
+        vectors.putAll(entries);
+        persistToFile();
+    }
+
+    /**
+     * 벡터 스토어를 비우고 즉시 영속화한다.
+     */
+    public void clearAndSave() {
+        vectors.clear();
+        persistToFile();
+    }
+
+    public boolean isEmpty() {
+        return vectors.isEmpty();
+    }
+
+    public int size() {
+        return vectors.size();
+    }
+
+    public Set<Long> ids() {
+        return Set.copyOf(vectors.keySet());
+    }
+
+    /**
+     * 코사인 유사도 기반 top-K 검색.
+     * @return ID 리스트 (유사도 내림차순)
+     */
+    public List<Long> search(float[] queryVector, int topK) {
+        if (vectors.isEmpty()) {
+            return List.of();
+        }
+
+        return vectors.entrySet().stream()
+            .map(e -> Map.entry(e.getKey(), cosineSimilarity(queryVector, e.getValue())))
+            .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
+            .limit(topK)
+            .map(Map.Entry::getKey)
+            .collect(Collectors.toList());
+    }
+
+    private double cosineSimilarity(float[] a, float[] b) {
+        if (a.length != b.length) return 0.0;
+        double dot = 0.0, normA = 0.0, normB = 0.0;
+        for (int i = 0; i < a.length; i++) {
+            dot += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+        }
+        double denom = Math.sqrt(normA) * Math.sqrt(normB);
+        return denom == 0.0 ? 0.0 : dot / denom;
+    }
+
+    private synchronized void persistToFile() {
+        try {
+            Files.createDirectories(storePath.getParent());
+            Map<String, List<Float>> serializable = new LinkedHashMap<>();
+            vectors.forEach((id, vec) -> {
+                List<Float> floatList = new ArrayList<>(vec.length);
+                for (float v : vec) floatList.add(v);
+                serializable.put(String.valueOf(id), floatList);
+            });
+            objectMapper.writerWithDefaultPrettyPrinter().writeValue(storePath.toFile(), serializable);
+        } catch (IOException e) {
+            log.warn("[벡터] JSON 저장 실패: {}", e.getMessage());
+        }
+    }
+
+    private void load() {
+        if (!Files.exists(storePath)) {
+            log.info("[벡터] 저장 파일 없음 — 빈 스토어로 시작");
+            return;
+        }
+        try {
+            Map<String, List<Float>> loaded = objectMapper.readValue(
+                storePath.toFile(),
+                new TypeReference<>() {}
+            );
+            loaded.forEach((idStr, floatList) -> {
+                float[] vec = new float[floatList.size()];
+                for (int i = 0; i < floatList.size(); i++) vec[i] = floatList.get(i);
+                vectors.put(Long.parseLong(idStr), vec);
+            });
+            log.info("[벡터] 저장 파일에서 {}건 로드 완료", vectors.size());
+        } catch (IOException e) {
+            log.warn("[벡터] JSON 로드 실패 — 빈 스토어로 시작: {}", e.getMessage());
+        }
+    }
+}
