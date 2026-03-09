@@ -220,6 +220,9 @@ public class CoverLetterFacade {
                                                 String questionText, EssayQuestion essayQuestion) {
         String currentDraft = currentLetter.getContent();
         CoverLetter latest = currentLetter;
+        CoverLetter bestLetter = currentLetter;
+        int bestScore = -1;
+        String bestDraft = currentDraft;
 
         for (int iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
             log.info("[에이전트] v{} → {}차 검토 시작 (문항: {})",
@@ -247,6 +250,17 @@ public class CoverLetterFacade {
                 iteration, review.totalScore(), review.grade(),
                 review.violations().size(), review.improvements().size());
 
+            // 최고 점수 버전 추적
+            if (review.totalScore() > bestScore) {
+                bestScore = review.totalScore();
+                bestLetter = latest;
+                bestDraft = currentDraft;
+            } else {
+                log.warn("[에이전트] 점수 하락 감지 ({}점 → {}점) — 최고 버전(v{}, {}점) 기반으로 재개선",
+                    bestScore, review.totalScore(), bestLetter.getVersion(), bestScore);
+                currentDraft = bestDraft;
+            }
+
             // 품질 등급 통과 (최소 반복 횟수 이후에만 적용)
             if (iteration >= MIN_ITERATIONS && passesQualityGrade(review.grade())) {
                 log.info("[에이전트] 품질 기준 통과! ({}등급, {}회 반복)", review.grade(), iteration);
@@ -259,7 +273,8 @@ public class CoverLetterFacade {
 
             // 마지막 반복이면 더 이상 개선하지 않음
             if (iteration == MAX_ITERATIONS) {
-                log.info("[에이전트] 최대 반복 횟수 도달 ({}회), 현재 버전으로 확정", MAX_ITERATIONS);
+                log.info("[에이전트] 최대 반복 횟수 도달 ({}회), 최고 버전(v{}, {}점)으로 확정",
+                    MAX_ITERATIONS, bestLetter.getVersion(), bestScore);
                 break;
             }
 
@@ -293,7 +308,7 @@ public class CoverLetterFacade {
             }
         }
 
-        return latest;
+        return bestLetter;
     }
 
     private boolean passesQualityGrade(String grade) {
