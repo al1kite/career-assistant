@@ -222,7 +222,6 @@ public class CoverLetterFacade {
         CoverLetter latest = currentLetter;
         CoverLetter bestLetter = currentLetter;
         int bestScore = -1;
-        String bestDraft = currentDraft;
 
         for (int iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
             log.info("[에이전트] v{} → {}차 검토 시작 (문항: {})",
@@ -254,11 +253,9 @@ public class CoverLetterFacade {
             if (review.totalScore() > bestScore) {
                 bestScore = review.totalScore();
                 bestLetter = latest;
-                bestDraft = currentDraft;
             } else {
-                log.warn("[에이전트] 점수 하락 감지 ({}점 → {}점) — 최고 버전(v{}, {}점) 기반으로 재개선",
+                log.warn("[에이전트] 점수 하락 감지 ({}점 → {}점) — 최고 버전: v{}({}점)",
                     bestScore, review.totalScore(), bestLetter.getVersion(), bestScore);
-                currentDraft = bestDraft;
             }
 
             // 품질 등급 통과 (최소 반복 횟수 이후에만 적용)
@@ -306,6 +303,20 @@ public class CoverLetterFacade {
                 }
                 break;
             }
+        }
+
+        // DB 최신 버전과 최고 점수 버전 일치 보장
+        if (bestLetter != latest && bestScore > 0) {
+            log.info("[에이전트] 최고 점수 버전(v{}, {}점)을 최종 버전(v{})으로 확정",
+                bestLetter.getVersion(), bestScore, latest.getVersion() + 1);
+            CoverLetter finalVersion = CoverLetter.ofVersion(
+                jobPosting, ai.getModelName(), bestLetter.getContent(),
+                latest.getVersion() + 1,
+                bestLetter.getQuestionIndex(), bestLetter.getQuestionText()
+            );
+            finalVersion.addReview(bestLetter.getFeedback(), bestScore);
+            coverLetterRepository.save(finalVersion);
+            return finalVersion;
         }
 
         return bestLetter;
