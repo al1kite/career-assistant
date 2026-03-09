@@ -179,7 +179,7 @@ public class CoverLetterFacade {
             // 검토
             ReviewResult review;
             try {
-                review = reviewAgent.review(currentDraft, jobPosting, questionText, iteration);
+                review = reviewAgent.review(currentDraft, jobPosting, questionText, iteration, experiences);
             } catch (Exception e) {
                 log.error("[에이전트] 검토 중 API 오류, 현재 버전을 최종으로 저장: {}", e.getMessage());
                 break;
@@ -261,6 +261,7 @@ public class CoverLetterFacade {
             case "aiDetectionRisk" -> "어미 반복을 깨고, 구어체 전환어('솔직히', '돌이켜보면')를 추가하고, 감정 표현을 넣으세요.";
             case "logicalStructure" -> "기승전결 순서를 점검하세요. 단락 간 논리 연결이 자연스러운지 확인하고, 비약이 있으면 연결 문장을 추가하세요.";
             case "keywordUsage" -> "채용공고의 핵심 키워드 3~5개를 추출하여 문맥에 맞게 자연스럽게 포함하세요.";
+            case "experienceConsistency" -> "제공된 경험 목록에 없는 프로젝트나 경력을 삭제하세요. 실제 경험만 정확히 인용하세요.";
             default -> "해당 항목의 점수를 높이기 위해 구체성과 관련성을 강화하세요.";
         };
     }

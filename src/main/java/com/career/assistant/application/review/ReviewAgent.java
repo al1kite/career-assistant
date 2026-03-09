@@ -1,5 +1,6 @@
 package com.career.assistant.application.review;
 
+import com.career.assistant.domain.experience.UserExperience;
 import com.career.assistant.domain.jobposting.JobPosting;
 import com.career.assistant.infrastructure.ai.AiPort;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -10,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -25,15 +27,16 @@ public class ReviewAgent {
         - 70점대: 아쉽지만 서류 탈락. 한두 가지만 고치면 될 수준.
         - 60점대 이하: 기본기 부족. 전면 재작성 필요.
 
-        [평가 항목 — 8개]
+        [평가 항목 — 9개]
         1. 답변적합도 (가중치 10%): 질문이 묻는 것에 정확히 답했는가? 질문 의도를 벗어나면 0점.
         2. 직무적합도 (가중치 20%): 당장 투입하면 일할 수 있겠는가? 기술 스택, 유사 경험, 구체적 성과.
         3. 조직적합도 (가중치 15%): 회사명을 바꾸면 못 쓸 정도로 특화됐는가? 이 회사만의 문화/방향 이해.
-        4. 구체성 (가중치 20%): 숫자, 프로젝트명, 정량적 성과가 있는가? "열심히 했다"는 0점.
+        4. 구체성 (가중치 15%): 숫자, 프로젝트명, 정량적 성과가 있는가? "열심히 했다"는 0점.
         5. 진정성/개성 (가중치 10%): 이 사람만의 고유한 이야기인가? 누구나 쓸 수 있는 말이면 0점.
         6. AI탐지 위험도 (가중치 10%): AI가 쓴 것 같은 패턴이 있는가? (높을수록 위험) 같은 어미 반복, 추상적 미사여구, 정형화된 구조.
         7. 논리적 구조 (가중치 5%): 기승전결 흐름이 명확한가? 각 단락이 유기적으로 연결되는가?
         8. 키워드 활용 (가중치 10%): 채용공고의 핵심 키워드가 자연스럽게 녹아있는가?
+        9. 경험 일관성 (가중치 5%): 자소서에 언급된 경험이 [제공된 경험 목록]과 일치하는가? 제공되지 않은 프로젝트, 회사, 수상 경력이 언급되면 0점.
 
         [피드백 규칙]
         - violations: 반드시 문장을 인용하고 구체적 문제를 지적하세요. "좀 더 구체적으로" 같은 모호한 피드백 금지.
@@ -50,7 +53,8 @@ public class ReviewAgent {
             "authenticity": 0~100,
             "aiDetectionRisk": 0~100,
             "logicalStructure": 0~100,
-            "keywordUsage": 0~100
+            "keywordUsage": 0~100,
+            "experienceConsistency": 0~100
           },
           "violations": ["문장 인용 + 구체적 문제 지적", ...],
           "improvements": ["현재 문장 인용 → 개선 방향 → 예시", ...],
@@ -66,8 +70,9 @@ public class ReviewAgent {
         this.objectMapper = objectMapper;
     }
 
-    public ReviewResult review(String draft, JobPosting jobPosting, String question, int iterationNum) {
-        String userPrompt = buildReviewPrompt(draft, jobPosting, question, iterationNum);
+    public ReviewResult review(String draft, JobPosting jobPosting, String question,
+                               int iterationNum, List<UserExperience> providedExperiences) {
+        String userPrompt = buildReviewPrompt(draft, jobPosting, question, iterationNum, providedExperiences);
         AiPort reviewer = claudeHaiku;
 
         try {
@@ -80,11 +85,34 @@ public class ReviewAgent {
         }
     }
 
-    private String buildReviewPrompt(String draft, JobPosting jobPosting, String question, int iterationNum) {
+    /** 하위호환: experiences 없이 호출하면 경험 목록 없이 검토 */
+    public ReviewResult review(String draft, JobPosting jobPosting, String question, int iterationNum) {
+        return review(draft, jobPosting, question, iterationNum, List.of());
+    }
+
+    private String buildReviewPrompt(String draft, JobPosting jobPosting, String question,
+                                      int iterationNum, List<UserExperience> providedExperiences) {
         String companyAnalysis = jobPosting.getCompanyAnalysis();
         String analysisSection = (companyAnalysis != null && !companyAnalysis.isBlank())
             ? "\n            [회사 심층 분석 — 조직적합도 평가 시 참고]\n            " + companyAnalysis + "\n"
             : "";
+
+        String experienceSection = "";
+        if (providedExperiences != null && !providedExperiences.isEmpty()) {
+            String expList = providedExperiences.stream()
+                .map(e -> "- [%s] %s (%s): %s".formatted(
+                    e.getCategory(), e.getTitle(), e.getPeriod(),
+                    e.getDescription() != null ? e.getDescription().substring(0, Math.min(100, e.getDescription().length())) : ""
+                ))
+                .collect(Collectors.joining("\n            "));
+            experienceSection = "\n            [제공된 경험 목록 — 경험 일관성 평가 시 참고]\n            "
+                + expList + "\n";
+        }
+
+        boolean hasExperiences = providedExperiences != null && !providedExperiences.isEmpty();
+        String experienceInstruction = hasExperiences
+            ? "경험 일관성 평가 시, 자소서에 언급된 경험이 [제공된 경험 목록]에 있는지 대조하세요."
+            : "경험 목록이 제공되지 않았으므로 experienceConsistency는 80으로 고정 채점하세요.";
 
         return """
             [검토 대상 자소서 — %d차 검토]
@@ -93,23 +121,26 @@ public class ReviewAgent {
             회사: %s
             직무설명: %s
             자격요건: %s
-            %s
+            %s%s
             [자소서 문항]
             %s
 
             [자소서 내용]
             %s
 
-            위 자소서를 8개 평가 항목으로 채점하고, violations과 improvements를 구체적으로 작성하세요.
+            위 자소서를 9개 평가 항목으로 채점하고, violations과 improvements를 구체적으로 작성하세요.
             조직적합도 평가 시, 회사 심층 분석 내용이 자소서에 얼마나 반영되었는지를 기준으로 채점하세요.
+            %s
             반드시 순수 JSON만 출력하세요.""".formatted(
                 iterationNum,
                 jobPosting.getCompanyName(),
                 jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "",
                 jobPosting.getRequirements() != null ? jobPosting.getRequirements() : "",
                 analysisSection,
+                experienceSection,
                 question != null ? question : "(단일 자소서)",
-                draft
+                draft,
+                experienceInstruction
             );
     }
 
@@ -119,6 +150,9 @@ public class ReviewAgent {
             JsonNode root = objectMapper.readTree(json);
 
             JsonNode scoresNode = root.get("scores");
+            int experienceConsistency = scoresNode.has("experienceConsistency")
+                ? scoresNode.get("experienceConsistency").asInt() : 80;
+
             ReviewResult.Scores scores = new ReviewResult.Scores(
                 scoresNode.get("answerRelevance").asInt(),
                 scoresNode.get("jobFit").asInt(),
@@ -127,7 +161,8 @@ public class ReviewAgent {
                 scoresNode.get("authenticity").asInt(),
                 scoresNode.get("aiDetectionRisk").asInt(),
                 scoresNode.get("logicalStructure").asInt(),
-                scoresNode.get("keywordUsage").asInt()
+                scoresNode.get("keywordUsage").asInt(),
+                experienceConsistency
             );
 
             List<String> violations = parseStringArray(root.get("violations"));

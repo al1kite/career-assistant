@@ -16,14 +16,15 @@ public record ReviewResult(
 ) {
 
     public record Scores(
-        int answerRelevance,    // 답변적합도
-        int jobFit,            // 직무적합도
-        int orgFit,            // 조직적합도
-        int specificity,       // 구체성
-        int authenticity,      // 진정성/개성
-        int aiDetectionRisk,   // AI탐지 위험도 (낮을수록 좋음)
-        int logicalStructure,  // 논리적 구조
-        int keywordUsage       // 키워드 활용
+        int answerRelevance,        // 답변적합도
+        int jobFit,                 // 직무적합도
+        int orgFit,                 // 조직적합도
+        int specificity,            // 구체성
+        int authenticity,           // 진정성/개성
+        int aiDetectionRisk,        // AI탐지 위험도 (낮을수록 좋음)
+        int logicalStructure,       // 논리적 구조
+        int keywordUsage,           // 키워드 활용
+        int experienceConsistency   // 경험 일관성
     ) {}
 
     public static int calculateTotalScore(Scores s) {
@@ -31,11 +32,12 @@ public record ReviewResult(
             s.answerRelevance * 0.10
             + s.jobFit * 0.20
             + s.orgFit * 0.15
-            + s.specificity * 0.20
+            + s.specificity * 0.15
             + s.authenticity * 0.10
             + (100 - s.aiDetectionRisk) * 0.10
             + s.logicalStructure * 0.05
             + s.keywordUsage * 0.10
+            + s.experienceConsistency * 0.05
         );
     }
 
@@ -48,7 +50,7 @@ public record ReviewResult(
     }
 
     /**
-     * 8개 항목 중 점수가 낮은 순으로 topN개 반환.
+     * 9개 항목 중 점수가 낮은 순으로 topN개 반환.
      * aiDetectionRisk는 반전(100-risk)하여 비교.
      * 반환: List<Map<String, Object>> (name, field, score)
      */
@@ -62,6 +64,7 @@ public record ReviewResult(
         dims.add(dimEntry("AI탐지 안전도", "aiDetectionRisk", 100 - scores.aiDetectionRisk));
         dims.add(dimEntry("논리적 구조", "logicalStructure", scores.logicalStructure));
         dims.add(dimEntry("키워드 활용", "keywordUsage", scores.keywordUsage));
+        dims.add(dimEntry("경험 일관성", "experienceConsistency", scores.experienceConsistency));
 
         dims.sort(Comparator.comparingInt(d -> (int) d.get("score")));
         return dims.subList(0, Math.min(topN, dims.size()));
@@ -76,7 +79,7 @@ public record ReviewResult(
     }
 
     public static ReviewResult fallback() {
-        Scores scores = new Scores(50, 50, 50, 50, 50, 50, 50, 50);
+        Scores scores = new Scores(50, 50, 50, 50, 50, 50, 50, 50, 80);
         int total = calculateTotalScore(scores);
         return new ReviewResult(
             scores, total, resolveGrade(total),
