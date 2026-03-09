@@ -72,6 +72,17 @@ public class CoverLetterController {
         }
     }
 
+    @Operation(summary = "자소서 추가 개선", description = "기존 자소서의 최신 버전을 기반으로 리뷰+개선 루프를 다시 실행합니다")
+    @PostMapping("/{jobPostingId}/improve")
+    public ResponseEntity<?> improve(@PathVariable Long jobPostingId) {
+        try {
+            var improved = coverLetterFacade.improveExisting(jobPostingId);
+            return ResponseEntity.ok(improved.stream().map(CoverLetterResponse::from).toList());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
     @Operation(summary = "자소서 목록 조회", description = "특정 채용공고의 자소서 목록을 조회합니다")
     @GetMapping
     public ResponseEntity<List<CoverLetterResponse>> getByJobPosting(@RequestParam Long jobPostingId) {
@@ -291,15 +302,7 @@ public class CoverLetterController {
     }
 
     private static Map<Integer, CoverLetter> extractLatestByQuestion(List<CoverLetter> letters) {
-        Map<Integer, CoverLetter> latest = new LinkedHashMap<>();
-        for (CoverLetter cl : letters) {
-            int qIdx = cl.getQuestionIndex() != null ? cl.getQuestionIndex() : 0;
-            CoverLetter existing = latest.get(qIdx);
-            if (existing == null || cl.getVersion() > existing.getVersion()) {
-                latest.put(qIdx, cl);
-            }
-        }
-        return latest;
+        return CoverLetterFacade.extractLatestByQuestion(letters);
     }
 
     private String resolveGrade(Integer score) {
