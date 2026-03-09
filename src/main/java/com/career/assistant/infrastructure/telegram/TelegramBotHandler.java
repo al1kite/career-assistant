@@ -181,7 +181,14 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
             return;
         }
 
-        JobPosting jobPosting = matched.get(0);
+        // 분석 데이터가 있는 공고 우선, 없으면 최신 공고
+        JobPosting jobPosting = matched.stream()
+            .filter(jp -> jp.getCompanyAnalysis() != null && !jp.getCompanyAnalysis().isBlank())
+            .max(java.util.Comparator.comparing(JobPosting::getCreatedAt))
+            .orElseGet(() -> matched.stream()
+                .max(java.util.Comparator.comparing(JobPosting::getCreatedAt))
+                .orElse(matched.get(0)));
+
         if (jobPosting.getCompanyAnalysis() == null || jobPosting.getCompanyAnalysis().isBlank()) {
             sendMessage("'%s' 회사의 분석 데이터가 없습니다.\n채용공고 URL을 먼저 보내 자소서를 생성해주세요.".formatted(jobPosting.getCompanyName()));
             return;

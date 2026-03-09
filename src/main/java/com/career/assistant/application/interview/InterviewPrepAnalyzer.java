@@ -1,7 +1,9 @@
 package com.career.assistant.application.interview;
 
+import com.career.assistant.common.AiResponseParser;
 import com.career.assistant.domain.experience.UserExperience;
 import com.career.assistant.domain.experience.UserExperienceRepository;
+import com.career.assistant.domain.jobposting.CompanyType;
 import com.career.assistant.domain.jobposting.JobPosting;
 import com.career.assistant.infrastructure.ai.AiPort;
 import com.career.assistant.infrastructure.ai.AiRouter;
@@ -52,13 +54,15 @@ public class InterviewPrepAnalyzer {
     }
 
     public InterviewPrepResult analyze(JobPosting jobPosting) {
-        AiPort ai = aiRouter.route(jobPosting.getCompanyType());
+        CompanyType companyType = jobPosting.getCompanyType() != null
+            ? jobPosting.getCompanyType() : CompanyType.UNKNOWN;
+        AiPort ai = aiRouter.route(companyType);
         List<UserExperience> experiences = userExperienceRepository.findAll();
 
         String userPrompt = buildUserPrompt(jobPosting, experiences);
-        log.info("[면접준비] AI 분석 요청 - {} (모델: {})", jobPosting.getCompanyName(), ai.getModelName());
+        log.info("[면접준비] AI 분석 요청 — {} (모델: {})", jobPosting.getCompanyName(), ai.getModelName());
         String response = ai.generate(SYSTEM_PROMPT, userPrompt);
-        log.info("[면접준비] AI 응답 수신 - {}", jobPosting.getCompanyName());
+        log.info("[면접준비] AI 응답 수신 — {}", jobPosting.getCompanyName());
 
         return parseResponse(response);
     }
@@ -115,7 +119,7 @@ public class InterviewPrepAnalyzer {
             throw new RuntimeException("면접 준비 분석 응답이 비어있습니다.");
         }
 
-        String json = extractJson(response);
+        String json = AiResponseParser.extractJson(response);
         if (json == null) {
             String preview = response.substring(0, Math.min(300, response.length()));
             log.warn("[면접준비] JSON 추출 실패. 응답 미리보기: {}", preview);
@@ -129,27 +133,6 @@ public class InterviewPrepAnalyzer {
             log.warn("[면접준비] JSON 파싱 실패: {}. 미리보기: {}", e.getMessage(), preview);
             throw new RuntimeException("면접 준비 분석 응답 파싱 실패.", e);
         }
-    }
-
-    private String extractJson(String response) {
-        if (response == null || response.isBlank()) return null;
-
-        String trimmed = response.strip();
-
-        if (trimmed.startsWith("```")) {
-            int endIdx = trimmed.lastIndexOf("```");
-            if (endIdx > 3) {
-                trimmed = trimmed.substring(trimmed.indexOf('\n') + 1, endIdx).strip();
-            }
-        }
-
-        int firstBrace = trimmed.indexOf('{');
-        int lastBrace = trimmed.lastIndexOf('}');
-        if (firstBrace >= 0 && lastBrace > firstBrace) {
-            return trimmed.substring(firstBrace, lastBrace + 1);
-        }
-
-        return null;
     }
 
     private String formatExperience(UserExperience e) {
