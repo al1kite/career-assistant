@@ -212,20 +212,16 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
     // ── 자소서 ──────────────────────────────────────────
 
     private void handleJobUrl(String url) {
-        boolean alreadyProcessed = jobPostingRepository.existsByUrl(url);
         String companyName = null;
-
-        if (alreadyProcessed) {
-            JobPosting existing = jobPostingRepository.findByUrl(url).orElse(null);
-            if (existing != null && !existing.needsCrawling()) {
-                List<CoverLetter> existingLetters = coverLetterRepository.findByJobPostingId(existing.getId());
-                if (!existingLetters.isEmpty()) {
-                    companyName = existing.getCompanyName();
-                }
+        JobPosting existing = jobPostingRepository.findByUrl(url).orElse(null);
+        if (existing != null && !existing.needsCrawling()) {
+            List<CoverLetter> existingLetters = coverLetterRepository.findByJobPostingId(existing.getId());
+            if (!existingLetters.isEmpty()) {
+                companyName = existing.getCompanyName();
             }
         }
 
-        if (!alreadyProcessed) {
+        if (companyName == null) {
             sendMessage("공고를 크롤링 중입니다...");
             sendMessage("회사를 AI로 심층 분석 중입니다... (경쟁사, 채용 배경, 문항별 작성 전략 등)");
             sendMessage("분석 완료 후 자소서를 생성합니다. AI 에이전트가 생성 → 검토 → 개선을 반복합니다. 잠시만 기다려주세요.");
