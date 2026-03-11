@@ -1,5 +1,6 @@
 package com.career.assistant.application;
 
+import com.career.assistant.api.dto.ReviewResponse;
 import com.career.assistant.application.review.ReviewAgent;
 import com.career.assistant.application.review.ReviewResult;
 import com.career.assistant.domain.coverletter.CoverLetter;
@@ -14,6 +15,7 @@ import com.career.assistant.infrastructure.crawling.CrawledJobInfo;
 import com.career.assistant.infrastructure.crawling.EssayQuestion;
 import com.career.assistant.infrastructure.crawling.JsoupCrawler;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -60,7 +62,71 @@ public class CoverLetterFacade {
     }
 
     @Transactional
+    public ReviewResponse reviewUserDraft(Long jobPostingId, String content, Integer questionIndex) {
+        JobPosting jp = jobPostingRepository.findById(jobPostingId)
+            .orElseThrow(() -> new IllegalArgumentException("공고를 찾을 수 없습니다: " + jobPostingId));
+
+        int qIdx = questionIndex != null ? questionIndex : 0;
+
+        // 기존 최신 버전 조회 → 새 버전 번호 계산
+        int nextVersion = coverLetterRepository
+            .findTopByJobPostingIdAndQuestionIndexOrderByVersionDesc(jobPostingId, qIdx)
+            .map(cl -> cl.getVersion() + 1)
+            .orElse(1);
+
+        // 문항 텍스트 가져오기
+        String questionText = coverLetterRepository
+            .findTopByJobPostingIdAndQuestionIndexOrderByVersionDesc(jobPostingId, qIdx)
+            .map(CoverLetter::getQuestionText)
+            .orElse(null);
+
+        // charLimit 계산
+        Map<Integer, Integer> charLimitByQuestion = deserializeCharLimits(jp);
+        int charLimit = charLimitByQuestion.getOrDefault(qIdx, 1000);
+
+        // 사용자 수정본으로 새 버전 저장
+        CoverLetter newVersion = CoverLetter.ofVersion(
+            jp, "user-edit", content, nextVersion, qIdx, questionText
+        );
+        coverLetterRepository.save(newVersion);
+
+        // 리뷰 실행
+        List<UserExperience> experiences = retrieveExperiencesOrFallback(jp, questionText);
+        ReviewResult review = reviewAgent.review(content, jp, questionText, 1, experiences, charLimit);
+
+        // 리뷰 결과 저장
+        newVersion.addReview(review.rawJson(), review.totalScore());
+        coverLetterRepository.save(newVersion);
+
+        log.info("[검토] 사용자 수정본 검토 완료 - 회사: {}, 문항: {}, v{}, 점수: {}",
+            jp.getCompanyName(), qIdx, nextVersion, review.totalScore());
+
+        // ReviewResponse로 변환
+        Map<String, Integer> scoreMap = new LinkedHashMap<>();
+        scoreMap.put("answerRelevance", review.scores().answerRelevance());
+        scoreMap.put("jobFit", review.scores().jobFit());
+        scoreMap.put("orgFit", review.scores().orgFit());
+        scoreMap.put("specificity", review.scores().specificity());
+        scoreMap.put("authenticity", review.scores().authenticity());
+        scoreMap.put("aiDetectionRisk", review.scores().aiDetectionRisk());
+        scoreMap.put("logicalStructure", review.scores().logicalStructure());
+        scoreMap.put("keywordUsage", review.scores().keywordUsage());
+        scoreMap.put("experienceConsistency", review.scores().experienceConsistency());
+
+        return new ReviewResponse(
+            review.totalScore(), review.grade(), review.overallComment(),
+            scoreMap, review.violations(), review.improvements(),
+            newVersion.getId(), nextVersion
+        );
+    }
+
+    @Transactional
     public List<CoverLetter> improveExisting(Long jobPostingId) {
+        return improveExisting(jobPostingId, null);
+    }
+
+    @Transactional
+    public List<CoverLetter> improveExisting(Long jobPostingId, String userMessage) {
         JobPosting jp = jobPostingRepository.findById(jobPostingId)
             .orElseThrow(() -> new IllegalArgumentException("공고를 찾을 수 없습니다: " + jobPostingId));
         List<CoverLetter> allLetters = coverLetterRepository.findByJobPostingId(jobPostingId);
@@ -72,12 +138,17 @@ public class CoverLetterFacade {
         AiPort ai = aiRouter.route(jp.getCompanyType());
         List<CoverLetter> results = new ArrayList<>();
 
+        // essayQuestionsJson에서 문항별 charLimit 매핑
+        Map<Integer, Integer> charLimitByQuestion = deserializeCharLimits(jp);
+
         log.info("[개선] 기존 자소서 추가 개선 시작 - 회사: {}, 문항 {}개", jp.getCompanyName(), latestByQuestion.size());
 
         for (CoverLetter latest : latestByQuestion.values()) {
+            int qIdx = latest.getQuestionIndex() != null ? latest.getQuestionIndex() : 0;
+            int charLimit = charLimitByQuestion.getOrDefault(qIdx, 1000);
             List<UserExperience> experiences = retrieveExperiencesOrFallback(jp, latest.getQuestionText());
             CoverLetter improved = generateWithReviewLoop(
-                latest, jp, experiences, ai, latest.getQuestionText(), null);
+                latest, jp, experiences, ai, latest.getQuestionText(), null, charLimit, userMessage);
             results.add(improved);
 
             log.info("[개선] 문항 {} 개선 완료 - v{} → v{}, 점수: {}",
@@ -168,14 +239,14 @@ public class CoverLetterFacade {
             List<UserExperience> experiences = retrieveExperiencesOrFallback(jobPosting, null);
             log.info("[RAG] 검색된 경험 {}건 (단일 자소서)", experiences.size());
 
-            String prompt = promptBuilder.build(jobPosting, experiences);
-            String content = ai.generate(prompt);
+            String prompt = promptBuilder.build(jobPosting, experiences, 1000);
+            String content = enforceCharLimit(ai.generate(prompt), 1000);
 
             CoverLetter coverLetter = CoverLetter.of(jobPosting, ai.getModelName(), content);
             coverLetterRepository.save(coverLetter);
 
             CoverLetter finalLetter = generateWithReviewLoop(
-                coverLetter, jobPosting, experiences, ai, null, null
+                coverLetter, jobPosting, experiences, ai, null, null, 1000, null
             );
 
             jobPosting.markFinalized();
@@ -190,7 +261,8 @@ public class CoverLetterFacade {
             log.info("[RAG] 문항 {} 검색된 경험 {}건", question.number(), experiences.size());
 
             String prompt = promptBuilder.buildForQuestion(jobPosting, experiences, question);
-            String content = ai.generate(prompt);
+            int charLimit = question.charLimit() > 0 ? question.charLimit() : 1000;
+            String content = enforceCharLimit(ai.generate(prompt), charLimit);
 
             CoverLetter coverLetter = CoverLetter.of(
                 jobPosting, ai.getModelName(), content,
@@ -200,7 +272,7 @@ public class CoverLetterFacade {
 
             CoverLetter finalLetter = generateWithReviewLoop(
                 coverLetter, jobPosting, experiences, ai,
-                question.questionText(), question
+                question.questionText(), question, charLimit, null
             );
             finalLetters.add(finalLetter);
 
@@ -217,7 +289,8 @@ public class CoverLetterFacade {
 
     private CoverLetter generateWithReviewLoop(CoverLetter currentLetter, JobPosting jobPosting,
                                                 List<UserExperience> experiences, AiPort ai,
-                                                String questionText, EssayQuestion essayQuestion) {
+                                                String questionText, EssayQuestion essayQuestion,
+                                                int charLimit, String userMessage) {
         String currentDraft = currentLetter.getContent();
         CoverLetter latest = currentLetter;
         CoverLetter bestLetter = currentLetter;
@@ -231,7 +304,7 @@ public class CoverLetterFacade {
             // 검토
             ReviewResult review;
             try {
-                review = reviewAgent.review(currentDraft, jobPosting, questionText, iteration, experiences);
+                review = reviewAgent.review(currentDraft, jobPosting, questionText, iteration, experiences, charLimit);
             } catch (Exception e) {
                 log.error("[에이전트] {}차 검토 중 API 오류: {}", iteration, e.getMessage());
                 if (iteration < MIN_ITERATIONS) {
@@ -281,9 +354,10 @@ public class CoverLetterFacade {
                 String targetedStrategy = buildTargetedStrategy(review);
                 log.info("[에이전트] 타겟 전략: {}", targetedStrategy.replace("\n", " | "));
                 String improvementPrompt = promptBuilder.buildImprovementPrompt(
-                    jobPosting, experiences, questionText, currentDraft, review.rawJson(), iteration, targetedStrategy
+                    jobPosting, experiences, questionText, currentDraft, review.rawJson(), iteration, targetedStrategy,
+                    charLimit, userMessage
                 );
-                String improvedContent = ai.generate(improvementPrompt);
+                String improvedContent = enforceCharLimit(ai.generate(improvementPrompt), charLimit);
 
                 // 새 버전 저장
                 CoverLetter newVersion = CoverLetter.ofVersion(
@@ -356,6 +430,53 @@ public class CoverLetterFacade {
             case "experienceConsistency" -> "제공된 경험 목록에 없는 프로젝트나 경력을 삭제하세요. 실제 경험만 정확히 인용하세요.";
             default -> "해당 항목의 점수를 높이기 위해 구체성과 관련성을 강화하세요.";
         };
+    }
+
+    String enforceCharLimit(String content, int charLimit) {
+        if (charLimit <= 0 || content == null) return content;
+        if (content.length() <= charLimit) return content;
+
+        // 120% 초과 시 문장 단위 트리밍
+        double ratio = (double) content.length() / charLimit;
+        if (ratio > 1.2) {
+            log.warn("[글자수] 제한 대비 {}% 초과 ({}/{}자) — 문장 단위 트리밍 적용",
+                Math.round((ratio - 1) * 100), content.length(), charLimit);
+        } else {
+            log.info("[글자수] 제한 초과 ({}/{}자) — 문장 단위 트리밍 적용", content.length(), charLimit);
+        }
+
+        // 문장 단위로 분리하여 charLimit 이내로 자르기
+        String[] sentences = content.split("(?<=[.!?。])\\s*");
+        StringBuilder trimmed = new StringBuilder();
+        for (String sentence : sentences) {
+            if (trimmed.length() + sentence.length() > charLimit) {
+                break;
+            }
+            trimmed.append(sentence);
+        }
+
+        // 문장 단위로 잘라도 빈 문자열이면 강제 절삭
+        if (trimmed.isEmpty()) {
+            return content.substring(0, charLimit);
+        }
+
+        log.info("[글자수] 트리밍 결과: {}자 → {}자 (제한: {}자)", content.length(), trimmed.length(), charLimit);
+        return trimmed.toString();
+    }
+
+    private Map<Integer, Integer> deserializeCharLimits(JobPosting jp) {
+        Map<Integer, Integer> map = new LinkedHashMap<>();
+        String json = jp.getEssayQuestionsJson();
+        if (json == null || json.isBlank()) return map;
+        try {
+            List<EssayQuestion> questions = objectMapper.readValue(json, new TypeReference<>() {});
+            for (EssayQuestion q : questions) {
+                map.put(q.number(), q.charLimit() > 0 ? q.charLimit() : 1000);
+            }
+        } catch (Exception e) {
+            log.warn("essayQuestionsJson 역직렬화 실패: {}", e.getMessage());
+        }
+        return map;
     }
 
     private List<UserExperience> retrieveExperiencesOrFallback(JobPosting jobPosting, String questionText) {

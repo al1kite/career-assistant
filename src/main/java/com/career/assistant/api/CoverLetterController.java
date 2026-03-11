@@ -6,6 +6,9 @@ import com.career.assistant.api.dto.CoverLetterHistoryResponse;
 import com.career.assistant.api.dto.CoverLetterResponse;
 import com.career.assistant.api.dto.CrawlPreviewResponse;
 import com.career.assistant.api.dto.GenerateCoverLetterRequest;
+import com.career.assistant.api.dto.ImproveRequest;
+import com.career.assistant.api.dto.ReviewRequest;
+import com.career.assistant.api.dto.ReviewResponse;
 import com.career.assistant.api.dto.ReviewTrendResponse;
 import com.career.assistant.application.CoverLetterFacade;
 import com.career.assistant.domain.coverletter.CoverLetter;
@@ -74,11 +77,26 @@ public class CoverLetterController {
 
     @Operation(summary = "자소서 추가 개선", description = "기존 자소서의 최신 버전을 기반으로 리뷰+개선 루프를 다시 실행합니다")
     @PostMapping("/{jobPostingId}/improve")
-    public ResponseEntity<?> improve(@PathVariable Long jobPostingId) {
+    public ResponseEntity<?> improve(@PathVariable Long jobPostingId,
+                                     @RequestBody(required = false) ImproveRequest request) {
         try {
-            var improved = coverLetterFacade.improveExisting(jobPostingId);
+            var improved = coverLetterFacade.improveExisting(
+                jobPostingId, request != null ? request.message() : null);
             return ResponseEntity.ok(improved.stream().map(CoverLetterResponse::from).toList());
         } catch (IllegalArgumentException | IllegalStateException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @Operation(summary = "사용자 수정본 검토", description = "사용자가 수정한 자소서를 제출하면 점수와 개선 방향을 반환합니다")
+    @PostMapping("/{jobPostingId}/review")
+    public ResponseEntity<?> reviewDraft(@PathVariable Long jobPostingId,
+                                         @Valid @RequestBody ReviewRequest request) {
+        try {
+            ReviewResponse response = coverLetterFacade.reviewUserDraft(
+                jobPostingId, request.content(), request.questionIndex());
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }

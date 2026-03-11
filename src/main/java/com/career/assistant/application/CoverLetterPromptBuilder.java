@@ -26,12 +26,17 @@ public class CoverLetterPromptBuilder {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public String build(JobPosting jobPosting, List<UserExperience> experiences) {
+        return build(jobPosting, experiences, 1000);
+    }
+
+    public String build(JobPosting jobPosting, List<UserExperience> experiences, int charLimit) {
         String experienceSummary = experiences.stream()
             .map(this::formatExperience)
             .collect(Collectors.joining("\n\n"));
 
         String tone = resolveTone(jobPosting.getCompanyType());
         String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
+        int targetMin = (int) (charLimit * 0.9);
 
         return """
             아래 채용공고와 지원자 경험을 바탕으로, 이 회사에만 쓸 수 있는 자소서를 작성하세요.
@@ -40,7 +45,17 @@ public class CoverLetterPromptBuilder {
             [최우선 규칙]
             순수 텍스트만 출력. 마크다운, 소제목, 번호, 불릿 전부 금지.
             단락 사이 빈 줄 하나로 구분. 자소서 본문만 출력.
-            800자 이상 1000자 이하.
+            반드시 %d자 이내로 작성하세요. (공백 포함, 초과 시 탈락)
+            목표 범위: %d자 ~ %d자.
+            인사팀(비개발자)이 읽는다는 점을 항상 기억하세요.
+
+            [기술 블로그 스타일 금지 — 위반 시 탈락]
+            이 글의 독자는 인사팀입니다. 개발자가 아닙니다.
+            - 기술 용어 3개 이상을 맥락 없이 나열하면 탈락입니다.
+            - 기술 이야기가 전체의 70%%를 넘으면 감점입니다.
+            - 모든 기술 언급에는 반드시 "왜 그 기술을 선택했는가" + "비즈니스 임팩트"가 동반되어야 합니다.
+            - 나쁜 예: "JPA N+1 문제를 해결하고 QueryDSL로 동적 쿼리를 최적화했습니다"
+            - 좋은 예: "주문 조회 API의 응답시간을 2.3초에서 0.4초로 줄여, 사용자 이탈률을 15%% 낮췄습니다"
 
             [기업 분석 — 반드시 자소서에 반영할 것]
             %s
@@ -52,19 +67,21 @@ public class CoverLetterPromptBuilder {
             채용공고에 나온 기술 키워드나 사업 내용을 정확히 짚으면서, "이 문제를 나도 풀어봤다" 또는 "이 방향에 내 경험이 정확히 맞닿는다"는 느낌을 주세요.
             첫 문장이 면접관의 눈을 잡아야 합니다.
 
-            승(承) 단락 (약 350자) — 핵심 경험으로 역량 증명.
+            승(承) 단락 (약 300자) — 핵심 경험으로 역량 증명.
             가장 관련성 높은 경험 1개를 깊이 있게 서술하세요. 나열 금지.
-            구체적 상황 → 내가 파악한 문제의 본질 → 내가 선택한 해결 방법과 그 이유 → 실행 과정(기술 스택, 도구) → 정량적 결과.
-            프로젝트명은 문장 안에 자연스럽게 녹이세요.
+            구체적 상황 → 내가 파악한 문제의 본질 → 내가 선택한 해결 방법과 그 이유 → 실행 과정 → 정량적 결과.
+            기술적 성과뿐 아니라 의사결정 과정, 팀 내 소통, 협업 경험을 함께 보여주세요.
+            기술 용어는 비즈니스 임팩트와 함께 쓰세요.
 
-            전(轉) 단락 (약 300자) — 이 회사와의 연결.
+            전(轉) 단락 (약 350자) — **이 회사와의 연결 (가장 중요한 단락).**
             내 경험이 왜 이 회사에서 중요한지, 이 회사가 지금 직면한 과제나 추구하는 방향과 내 역량이 어떻게 맞물리는지를 보여주세요.
-            회사의 경쟁 우위, 핵심 사업, 기술 방향을 구체적으로 언급하면서 연결하세요.
+            기업 분석의 businessChallenges, competitiveAdvantage, techDirection을 직접 인용하여 연결하세요.
+            회사의 제품/서비스 고유명사를 반드시 언급하세요.
             "이 회사가 아니면 안 되는 이유"가 여기서 드러나야 합니다.
 
             결(結) 단락 (약 200자) — 입사 후 구체적 액션.
             "열심히 하겠습니다", "기여하겠습니다" 같은 추상적 다짐은 0점입니다.
-            첫 3개월 안에 구체적으로 무엇을 하겠는지, 어떤 기술적 문제를 풀겠는지 쓰세요.
+            첫 3개월 안에 구체적으로 무엇을 하겠는지, 어떤 비즈니스 문제를 풀겠는지 쓰세요.
             이 회사의 현재 과제와 본인의 역량이 만나는 지점을 보여주세요.
 
             [충성도 표현 — 자연스럽게 녹이세요]
@@ -76,6 +93,8 @@ public class CoverLetterPromptBuilder {
             - 직무적합성: 이 직무를 수행할 구체적 역량과 경험이 보이는가?
             - 조직적합성: 이 회사의 문화와 가치관에 맞는 사람인가?
             - 성장가능성: 장기적으로 이 회사에서 성장하고 싶은 진정성이 있는가?
+            - 기술 나열이 아니라 '왜 그 기술을 선택했는가'의 판단 과정을 보여주세요.
+            - 인사팀은 '이 사람과 함께 일하고 싶은가?'를 봅니다.
 
             [키워드 전략]
             - 행동동사 중심: "설계했습니다", "주도했습니다", "구축했습니다"
@@ -90,13 +109,10 @@ public class CoverLetterPromptBuilder {
             "소중한 경험" / "값진 교훈" / "뜻깊은 시간"
             같은 어미(~했습니다) 3회 연속 사용
 
-            [AI 판별 회피 — 필수 적용 기법]
-            1. 문장 리듬 변주: 짧은(15자)과 긴(35~45자) 2:1 교차
-            2. 감각적 디테일: 오감 기반 표현 최소 2회 ("새벽 4시 서버실 냉기")
-            3. 구어체 전환어: "솔직히", "돌이켜보면", "그날은" 중 2~3개
-            4. 불완전 문장: 수사적 질문/문장 파편 1~2회 ("47일. 그게 필요한 시간이었습니다.")
-            5. 감정 동사: "짜릿했습니다", "억울했습니다", "오기가 생겼습니다" 최소 2회
-            6. 비정형 숫자: "정확히 47일", "2.3배", "새벽 4시 17분"
+            [AI 판별 회피]
+            - 문장 리듬 변주: 짧은 문장과 긴 문장을 섞으세요.
+            - 구어체 전환어를 1~2회 자연스럽게 사용하세요: "솔직히", "돌이켜보면" 등.
+            - 같은 어미가 반복되지 않도록 변주하세요.
 
             %s
 
@@ -110,6 +126,9 @@ public class CoverLetterPromptBuilder {
 
             [지원자 경험]
             %s""".formatted(
+                charLimit,
+                targetMin,
+                charLimit,
                 companyAnalysis,
                 EXPERIENCE_GROUNDING_RULES,
                 tone,
@@ -132,6 +151,7 @@ public class CoverLetterPromptBuilder {
         String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
         String questionGuide = buildQuestionGuide(jobPosting, question);
         int charLimit = question.charLimit() > 0 ? question.charLimit() : 1000;
+        int targetMin = (int) (charLimit * 0.9);
 
         return """
             아래 채용공고의 자소서 문항에 대한 답변을 작성하세요.
@@ -140,7 +160,17 @@ public class CoverLetterPromptBuilder {
             [최우선 규칙]
             순수 텍스트만 출력. 마크다운, 소제목, 번호, 불릿 전부 금지.
             단락 사이 빈 줄 하나로 구분. 자소서 본문만 출력.
-            반드시 %d자 이내로 작성하세요. (공백 포함, 초과 절대 금지)
+            반드시 %d자 이내로 작성하세요. (공백 포함, 초과 시 탈락)
+            목표 범위: %d자 ~ %d자.
+            인사팀(비개발자)이 읽는다는 점을 항상 기억하세요.
+
+            [기술 블로그 스타일 금지 — 위반 시 탈락]
+            이 글의 독자는 인사팀입니다. 개발자가 아닙니다.
+            - 기술 용어 3개 이상을 맥락 없이 나열하면 탈락입니다.
+            - 기술 이야기가 전체의 70%%를 넘으면 감점입니다.
+            - 모든 기술 언급에는 반드시 "왜 그 기술을 선택했는가" + "비즈니스 임팩트"가 동반되어야 합니다.
+            - 나쁜 예: "JPA N+1 문제를 해결하고 QueryDSL로 동적 쿼리를 최적화했습니다"
+            - 좋은 예: "주문 조회 API의 응답시간을 2.3초에서 0.4초로 줄여, 사용자 이탈률을 15%% 낮췄습니다"
 
             [문항 %d번]
             %s
@@ -156,10 +186,10 @@ public class CoverLetterPromptBuilder {
 
             [기승전결 서사 구조 — 이 문항에 맞게 적용]
             기(起): 문항의 핵심 주제와 연결되는 강렬한 첫 문장. 이 회사의 구체적 특성을 짚으며 시작하세요.
-            승(承): 관련 경험 서술. 구체적 상황 → 문제 파악 → 해결 방법 선택 이유 → 실행(기술/행동) → 정량적 결과.
-            전(轉): 왜 이 경험이 이 회사에서 중요한지. 회사의 현재 과제·방향과 내 역량의 접점.
+            승(承): 관련 경험 서술. 구체적 상황 → 문제 파악 → 해결 방법과 이유 → 실행 → 정량적 결과. 기술보다 의사결정 과정과 비즈니스 임팩트를 중심으로.
+            전(轉) **(가장 중요)**: 왜 이 경험이 이 회사에서 중요한지. 기업 분석의 businessChallenges, competitiveAdvantage, techDirection을 직접 인용하여 내 역량과의 접점을 보여주세요. 회사 제품/서비스 고유명사 필수.
             결(結): 이 회사에서 구체적으로 무엇을 하겠는지. 첫 3개월 액션 플랜.
-            (글자수에 따라 단락 비중을 조절하되, 기승전결 흐름은 반드시 유지)
+            (글자수에 따라 단락 비중을 조절하되, 전(轉)에 가장 많은 비중을 두세요)
 
             [충성도 표현 — 자연스럽게 녹이세요]
             - 이 회사의 제품/서비스/기술을 직접 경험한 이야기를 포함하세요.
@@ -170,6 +200,8 @@ public class CoverLetterPromptBuilder {
             - 직무적합성: 이 직무를 수행할 구체적 역량과 경험이 보이는가?
             - 조직적합성: 이 회사의 문화와 가치관에 맞는 사람인가?
             - 성장가능성: 장기적으로 이 회사에서 성장하고 싶은 진정성이 있는가?
+            - 기술 나열이 아니라 '왜 그 기술을 선택했는가'의 판단 과정을 보여주세요.
+            - 인사팀은 '이 사람과 함께 일하고 싶은가?'를 봅니다.
 
             [키워드 전략]
             - 행동동사 중심: "설계했습니다", "주도했습니다", "구축했습니다"
@@ -184,13 +216,10 @@ public class CoverLetterPromptBuilder {
             "소중한 경험" / "값진 교훈" / "뜻깊은 시간"
             같은 어미(~했습니다) 3회 연속 사용
 
-            [AI 판별 회피 — 필수 적용 기법]
-            1. 문장 리듬 변주: 짧은(15자)과 긴(35~45자) 2:1 교차
-            2. 감각적 디테일: 오감 기반 표현 최소 2회 ("새벽 4시 서버실 냉기")
-            3. 구어체 전환어: "솔직히", "돌이켜보면", "그날은" 중 2~3개
-            4. 불완전 문장: 수사적 질문/문장 파편 1~2회 ("47일. 그게 필요한 시간이었습니다.")
-            5. 감정 동사: "짜릿했습니다", "억울했습니다", "오기가 생겼습니다" 최소 2회
-            6. 비정형 숫자: "정확히 47일", "2.3배", "새벽 4시 17분"
+            [AI 판별 회피]
+            - 문장 리듬 변주: 짧은 문장과 긴 문장을 섞으세요.
+            - 구어체 전환어를 1~2회 자연스럽게 사용하세요: "솔직히", "돌이켜보면" 등.
+            - 같은 어미가 반복되지 않도록 변주하세요.
 
             %s
 
@@ -204,6 +233,8 @@ public class CoverLetterPromptBuilder {
 
             [지원자 경험]
             %s""".formatted(
+                charLimit,
+                targetMin,
                 charLimit,
                 question.number(),
                 question.questionText(),
@@ -224,19 +255,33 @@ public class CoverLetterPromptBuilder {
                                            String question, String previousDraft,
                                            String reviewFeedbackJson, int iterationNum) {
         return buildImprovementPrompt(jobPosting, experiences, question, previousDraft,
-            reviewFeedbackJson, iterationNum, null);
+            reviewFeedbackJson, iterationNum, null, 1000, null);
     }
 
     public String buildImprovementPrompt(JobPosting jobPosting, List<UserExperience> experiences,
                                            String question, String previousDraft,
                                            String reviewFeedbackJson, int iterationNum,
                                            String targetedStrategy) {
+        return buildImprovementPrompt(jobPosting, experiences, question, previousDraft,
+            reviewFeedbackJson, iterationNum, targetedStrategy, 1000, null);
+    }
+
+    public String buildImprovementPrompt(JobPosting jobPosting, List<UserExperience> experiences,
+                                           String question, String previousDraft,
+                                           String reviewFeedbackJson, int iterationNum,
+                                           String targetedStrategy, int charLimit,
+                                           String userMessage) {
         String experienceSummary = experiences.stream()
             .map(this::formatExperience)
             .collect(Collectors.joining("\n\n"));
 
         String tone = resolveTone(jobPosting.getCompanyType());
         String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
+
+        String userMessageSection = "";
+        if (userMessage != null && !userMessage.isBlank()) {
+            userMessageSection = "\n            [사용자 추가 지시사항]\n            " + userMessage + "\n";
+        }
 
         String improvementSection;
         if (targetedStrategy != null && !targetedStrategy.isBlank()) {
@@ -246,7 +291,8 @@ public class CoverLetterPromptBuilder {
             [추가 원칙]
             1. 잘 쓴 부분은 반드시 유지하거나 더 강화하세요.
             2. violations에 지적된 문장은 반드시 수정하세요.
-            3. improvements에 제시된 개선 방향과 예시를 적극 참고하세요.""".formatted(targetedStrategy);
+            3. improvements에 제시된 개선 방향과 예시를 적극 참고하세요.
+            4. 기술 용어를 지나치게 나열하지 말고, 의사결정 과정과 협업 맥락을 강조하세요.""".formatted(targetedStrategy);
         } else {
             improvementSection = """
             [개선 원칙 — %d차 개선]
@@ -256,7 +302,8 @@ public class CoverLetterPromptBuilder {
             4. AI탐지 위험도가 높다면: 추상적 표현을 구체적으로 바꾸고, 어미 반복을 깨고, 감정과 생생한 디테일을 추가하세요.
             5. 구체성 점수가 낮다면: 숫자, 프로젝트명, KPI, 정량적 성과를 반드시 추가하세요.
             6. 조직적합도가 낮다면: 이 회사만의 특성, 문화, 기술 방향을 더 구체적으로 언급하세요.
-            7. 키워드 활용이 낮다면: 채용공고의 핵심 키워드를 자연스럽게 녹이세요.""".formatted(iterationNum);
+            7. 키워드 활용이 낮다면: 채용공고의 핵심 키워드를 자연스럽게 녹이세요.
+            8. 기술 용어를 지나치게 나열하지 말고, 의사결정 과정과 협업 맥락을 강조하세요.""".formatted(iterationNum);
         }
 
         return """
@@ -266,7 +313,8 @@ public class CoverLetterPromptBuilder {
             [최우선 규칙]
             순수 텍스트만 출력. 마크다운, 소제목, 번호, 불릿 전부 금지.
             단락 사이 빈 줄 하나로 구분. 자소서 본문만 출력.
-
+            반드시 %d자 이내로 작성하세요. (공백 포함, 초과 절대 금지)
+            %s
             %s
 
             [검토 피드백 (채용팀장)]
@@ -295,6 +343,8 @@ public class CoverLetterPromptBuilder {
             %s
 
             위 피드백을 모두 반영하여 개선된 자소서를 작성하세요. 자소서 본문만 출력하세요.""".formatted(
+                charLimit,
+                userMessageSection,
                 improvementSection,
                 reviewFeedbackJson,
                 previousDraft,
@@ -321,13 +371,16 @@ public class CoverLetterPromptBuilder {
                 guide.append("대상 회사: ").append(jobPosting.getCompanyName()).append("\n\n");
 
                 appendAnalysisField(guide, analysis, "companyOverview", "회사 개요");
-                appendAnalysisArray(guide, analysis, "coreProducts", "핵심 제품/서비스");
+                appendAnalysisObjectArray(guide, analysis, "coreProducts", "핵심 제품/서비스", "name", "description");
                 appendAnalysisField(guide, analysis, "competitiveAdvantage", "경쟁 우위");
-                appendAnalysisArray(guide, analysis, "competitors", "주요 경쟁사");
+                appendAnalysisObjectArray(guide, analysis, "competitors", "주요 경쟁사", "name", "differentiation");
                 appendAnalysisField(guide, analysis, "hiringReason", "채용 배경 (이 포지션을 뽑는 이유)");
                 appendAnalysisField(guide, analysis, "idealCandidate", "이상적 지원자 프로필");
                 appendAnalysisField(guide, analysis, "companyValues", "핵심 가치/문화");
-                appendAnalysisField(guide, analysis, "techStack", "기술 스택/방향");
+                appendAnalysisField(guide, analysis, "techDirection", "기술 방향성/투자 동향");
+                appendAnalysisField(guide, analysis, "techStack", "기술 스택");
+                appendAnalysisField(guide, analysis, "businessChallenges", "현재 사업/기술 과제");
+                appendAnalysisField(guide, analysis, "recentNews", "최근 주요 뉴스/발표");
                 appendAnalysisField(guide, analysis, "recentTrends", "최근 동향/전략");
 
                 guide.append("\n위 분석 내용을 자소서 곳곳에 자연스럽게 녹이세요. ");
@@ -430,9 +483,37 @@ public class CoverLetterPromptBuilder {
             StringBuilder items = new StringBuilder();
             for (JsonNode item : arr) {
                 if (!items.isEmpty()) items.append(", ");
-                items.append(item.asText());
+                if (item.isObject()) {
+                    // 객체 배열 하위호환: name 필드가 있으면 name만 추출
+                    String name = item.path("name").asText("");
+                    items.append(name.isBlank() ? item.toString() : name);
+                } else {
+                    items.append(item.asText());
+                }
             }
             sb.append(items).append("\n");
+        }
+    }
+
+    private void appendAnalysisObjectArray(StringBuilder sb, JsonNode analysis, String field, String label,
+                                            String nameKey, String descKey) {
+        JsonNode arr = analysis.path(field);
+        if (arr.isArray() && !arr.isEmpty()) {
+            sb.append("- ").append(label).append(":\n");
+            for (JsonNode item : arr) {
+                if (item.isObject()) {
+                    String name = item.path(nameKey).asText("");
+                    String desc = item.path(descKey).asText("");
+                    if (!name.isBlank()) {
+                        sb.append("  · ").append(name);
+                        if (!desc.isBlank()) sb.append(" — ").append(desc);
+                        sb.append("\n");
+                    }
+                } else {
+                    // 하위호환: 문자열 배열도 처리
+                    sb.append("  · ").append(item.asText()).append("\n");
+                }
+            }
         }
     }
 

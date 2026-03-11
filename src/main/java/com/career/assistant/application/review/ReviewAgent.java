@@ -18,8 +18,10 @@ import java.util.stream.Collectors;
 public class ReviewAgent {
 
     private static final String REVIEWER_SYSTEM_PROMPT = """
-        당신은 대기업 15년차 채용팀장입니다. 지금까지 자소서 5만 건 이상을 검토했습니다.
+        당신은 인사팀 소속 15년차 채용팀장입니다. 기술팀이 아닙니다.
+        지금까지 자소서 5만 건 이상을 검토했습니다.
         당신의 유일한 기준: "이 지원자를 면접에 부를 것인가?"
+        비개발자가 읽어도 지원자의 역량이 느껴지는지를 기준으로 평가하세요.
 
         [채점 기준 — 절대 평가, 엄격하게]
         당신은 후한 점수를 절대 주지 않습니다. 빈말 칭찬 없이 냉정하게 평가하세요.
@@ -38,10 +40,25 @@ public class ReviewAgent {
         - "기여하겠습니다", "성장하겠습니다" 같은 추상적 다짐이 있으면 authenticity -15점.
         - 회사명만 바꾸면 다른 회사에도 쓸 수 있는 내용이면 orgFit 최대 50점.
 
+        [기술 블로그 스타일 보정 규칙]
+        - 기술 용어 3개 이상을 맥락(이유/임팩트) 없이 나열 → authenticity -20, aiDetectionRisk +15.
+        - 기술 이야기가 전체의 70% 이상 → orgFit 최대 40.
+        - 모든 기술 언급에 "왜 선택했는가" + "비즈니스 임팩트"가 없으면 감점.
+
+        [orgFit 세분화 규칙 — 회사 고유명사 기준]
+        - 회사 제품/서비스 고유명사 0개 → orgFit 최대 30점.
+        - 회사 제품/서비스 고유명사 1개 → orgFit 최대 50점.
+        - 회사 제품/서비스 고유명사 2개 이상 → orgFit 최대 100점.
+        (고유명사 = 회사명이 아닌, 해당 회사의 제품/서비스/시스템 이름)
+
+        [추가 보정 규칙]
+        - 범용적 첫 문장 ("직장을 선택할 때...", "저는 어릴 때부터...") → answerRelevance -10.
+        - 추상적 마무리 ("일하고 싶습니다", "성장하겠습니다") → authenticity -15.
+
         [평가 항목 — 9개]
         1. 답변적합도 (가중치 10%): 질문이 묻는 것에 정확히 답했는가? 질문 의도를 벗어나면 0점.
         2. 직무적합도 (가중치 20%): 당장 투입하면 일할 수 있겠는가? 기술 스택, 유사 경험, 구체적 성과.
-        3. 조직적합도 (가중치 15%): 회사명을 바꾸면 못 쓸 정도로 특화됐는가? 이 회사만의 문화/방향 이해.
+        3. 조직적합도 (가중치 15%): 회사명을 바꾸면 못 쓸 정도로 특화됐는가? 이 회사만의 문화/방향 이해. 회사 제품/서비스 고유명사 필수.
         4. 구체성 (가중치 15%): 숫자, 프로젝트명, 정량적 성과가 있는가? "열심히 했다"는 0점.
         5. 진정성/개성 (가중치 10%): 이 사람만의 고유한 이야기인가? 누구나 쓸 수 있는 말이면 0점.
         6. AI탐지 위험도 (가중치 10%): AI가 쓴 것 같은 패턴이 있는가? (높을수록 위험) 같은 어미 반복, 추상적 미사여구, 정형화된 구조.
@@ -73,18 +90,28 @@ public class ReviewAgent {
         }""";
 
     private final AiPort claudeHaiku;
+    private final AiPort claudeSonnet;
     private final ObjectMapper objectMapper;
 
     public ReviewAgent(@Qualifier("claudeHaiku") AiPort claudeHaiku,
+                       @Qualifier("claudeSonnet") AiPort claudeSonnet,
                        ObjectMapper objectMapper) {
         this.claudeHaiku = claudeHaiku;
+        this.claudeSonnet = claudeSonnet;
         this.objectMapper = objectMapper;
     }
 
     public ReviewResult review(String draft, JobPosting jobPosting, String question,
                                int iterationNum, List<UserExperience> providedExperiences) {
-        String userPrompt = buildReviewPrompt(draft, jobPosting, question, iterationNum, providedExperiences);
-        AiPort reviewer = claudeHaiku;
+        return review(draft, jobPosting, question, iterationNum, providedExperiences, 0);
+    }
+
+    public ReviewResult review(String draft, JobPosting jobPosting, String question,
+                               int iterationNum, List<UserExperience> providedExperiences,
+                               int charLimit) {
+        String userPrompt = buildReviewPrompt(draft, jobPosting, question, iterationNum, providedExperiences, charLimit);
+        // 1차 리뷰는 Sonnet (개선 방향을 결정하는 가장 중요한 리뷰), 이후는 Haiku
+        AiPort reviewer = (iterationNum == 1) ? claudeSonnet : claudeHaiku;
 
         try {
             log.info("[에이전트] {}차 검토 — 모델: {}", iterationNum, reviewer.getModelName());
@@ -102,7 +129,8 @@ public class ReviewAgent {
     }
 
     private String buildReviewPrompt(String draft, JobPosting jobPosting, String question,
-                                      int iterationNum, List<UserExperience> providedExperiences) {
+                                      int iterationNum, List<UserExperience> providedExperiences,
+                                      int charLimit) {
         String companyAnalysis = jobPosting.getCompanyAnalysis();
         String analysisSection = (companyAnalysis != null && !companyAnalysis.isBlank())
             ? "\n            [회사 심층 분석 — 조직적합도 평가 시 참고]\n            " + companyAnalysis + "\n"
@@ -125,6 +153,13 @@ public class ReviewAgent {
             ? "경험 일관성 평가 시, 자소서에 언급된 경험이 [제공된 경험 목록]에 있는지 대조하세요."
             : "경험 목록이 제공되지 않았으므로 experienceConsistency는 80으로 고정 채점하세요.";
 
+        int actualLength = draft != null ? draft.length() : 0;
+        String charLimitSection = charLimit > 0
+            ? "\n            [글자수 정보] 실제: %d자 / 제한: %d자. %s\n".formatted(
+                actualLength, charLimit,
+                actualLength > charLimit ? "글자수 초과! violations에 반드시 지적하세요." : "글자수 준수.")
+            : "";
+
         return """
             [검토 대상 자소서 — %d차 검토]
 
@@ -132,7 +167,7 @@ public class ReviewAgent {
             회사: %s
             직무설명: %s
             자격요건: %s
-            %s%s
+            %s%s%s
             [자소서 문항]
             %s
 
@@ -149,6 +184,7 @@ public class ReviewAgent {
                 jobPosting.getRequirements() != null ? jobPosting.getRequirements() : "",
                 analysisSection,
                 experienceSection,
+                charLimitSection,
                 question != null ? question : "(단일 자소서)",
                 draft,
                 experienceInstruction

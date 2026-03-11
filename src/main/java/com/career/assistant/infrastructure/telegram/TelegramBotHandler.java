@@ -257,12 +257,17 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
     }
 
     private void handleImproveCommand(String text) {
-        String companyName = text.replaceFirst("/개선", "").trim();
+        String args = text.replaceFirst("/개선", "").trim();
 
-        if (companyName.isEmpty()) {
-            sendMessage("사용법: /개선 {회사명}\n예: /개선 카카오");
+        if (args.isEmpty()) {
+            sendMessage("사용법: /개선 {회사명} [추가 지시사항]\n예: /개선 카카오\n예: /개선 카카오 인사팀 관점으로 써줘");
             return;
         }
+
+        // 첫 단어 = 회사명, 나머지 = userMessage
+        String[] parts = args.split("\\s+", 2);
+        String companyName = parts[0];
+        String userMessage = parts.length > 1 ? parts[1] : null;
 
         List<JobPosting> matched = jobPostingRepository.findByCompanyNameContaining(companyName);
         if (matched.isEmpty()) {
@@ -286,10 +291,14 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
             beforeScores.put(entry.getKey(), entry.getValue().getReviewScore() != null ? entry.getValue().getReviewScore() : 0);
         }
 
-        sendMessage("'%s' 자소서 추가 개선을 시작합니다. AI 에이전트가 검토 → 개선을 반복합니다...".formatted(jp.getCompanyName()));
+        String startMsg = "'%s' 자소서 추가 개선을 시작합니다. AI 에이전트가 검토 → 개선을 반복합니다...".formatted(jp.getCompanyName());
+        if (userMessage != null) {
+            startMsg += "\n추가 지시: " + userMessage;
+        }
+        sendMessage(startMsg);
 
         try {
-            List<CoverLetter> improved = coverLetterFacade.improveExisting(jp.getId());
+            List<CoverLetter> improved = coverLetterFacade.improveExisting(jp.getId(), userMessage);
 
             StringBuilder sb = new StringBuilder("'%s' 자소서 개선 완료!\n\n".formatted(jp.getCompanyName()));
             for (CoverLetter cl : improved) {
