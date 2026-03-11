@@ -19,13 +19,17 @@ public class CompanyAnalyzer {
         당신은 대한민국 기업 리서치 전문가입니다.
         회사명과 채용공고 정보를 바탕으로 심층 분석을 제공합니다.
         반드시 JSON 형식으로만 응답하세요. 마크다운 코드블록(```) 없이 순수 JSON만 출력하세요.
-        중요: 각 필드를 1~2문장으로 간결하게 작성하세요. 총 응답 길이가 2000자를 넘지 않게 하세요.""";
 
-    private final AiPort claudeHaiku;
+        [핵심 원칙]
+        - 구체적 제품명, 서비스명, 시스템명 등 고유명사를 반드시 포함하세요.
+        - "금융 IT 서비스", "솔루션 기업" 같은 포괄적 표현 금지. "exture+(초저지연 주문 처리 시스템)" 수준의 구체성 필요.
+        - 각 필드를 충분히 상세하게 작성하세요. 피상적 분석은 가치가 없습니다.""";
+
+    private final AiPort claudeSonnet;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public CompanyAnalyzer(@Qualifier("claudeHaiku") AiPort claudeHaiku) {
-        this.claudeHaiku = claudeHaiku;
+    public CompanyAnalyzer(@Qualifier("claudeSonnet") AiPort claudeSonnet) {
+        this.claudeSonnet = claudeSonnet;
     }
 
     /**
@@ -35,7 +39,7 @@ public class CompanyAnalyzer {
     public String analyze(JobPosting jobPosting, List<EssayQuestion> questions) {
         try {
             String userPrompt = buildAnalysisPrompt(jobPosting, questions);
-            String response = claudeHaiku.generate(SYSTEM_PROMPT, userPrompt);
+            String response = claudeSonnet.generate(SYSTEM_PROMPT, userPrompt);
 
             String jsonStr = extractJson(response);
             if (jsonStr != null) {
@@ -103,34 +107,42 @@ public class CompanyAnalyzer {
 
             다음 JSON 구조로 정확히 응답하세요 (값은 한국어로):
             {
-              "companyOverview": "회사 소개 (핵심 사업, 제품/서비스, 시장 내 위치). 공개 정보 기반으로 구체적으로 작성",
-              "coreProducts": ["주요 제품/서비스 1", "주요 제품/서비스 2"],
-              "competitiveAdvantage": "경쟁사 대비 이 회사만의 차별점",
-              "competitors": ["주요 경쟁사 1", "주요 경쟁사 2"],
+              "companyOverview": "회사 소개. 핵심 사업, 시장 내 위치, 매출 규모 등을 구체적 고유명사와 함께 작성",
+              "coreProducts": [
+                {"name": "제품/서비스 고유명사", "description": "이 제품이 무엇이고 왜 중요한지 2~3문장"},
+                {"name": "제품/서비스 고유명사 2", "description": "설명"}
+              ],
+              "competitiveAdvantage": "경쟁사 대비 이 회사만의 차별점. 구체적 기술/사업 우위를 고유명사로",
+              "competitors": [
+                {"name": "경쟁사명", "differentiation": "이 회사가 경쟁사 대비 뛰어난 점"},
+                {"name": "경쟁사명 2", "differentiation": "차별점"}
+              ],
               "hiringReason": "이 포지션을 채용하는 이유 추론 (사업 확장, 신규 프로젝트, 기술 전환 등)",
               "idealCandidate": "이 포지션의 이상적 지원자 프로필",
               "companyValues": "회사의 핵심 가치와 조직 문화",
-              "techStack": "이 포지션 관련 기술 스택/방향성",
+              "techDirection": "현재 기술 방향성과 투자/전환 동향. 구체적 기술명과 이유를 포함",
+              "businessChallenges": "이 회사가 현재 직면한 사업/기술 과제 2~3가지",
+              "recentNews": "최근 1~2년간 주요 뉴스, 발표, 인수합병, 신사업 등",
               "recentTrends": "이 회사/업계의 최근 동향과 전략 방향",
               "questionGuides": [
                 {
                   "questionIndex": 1,
                   "questionText": "문항 원문",
                   "questionType": "지원동기/핵심역량/문제해결/협업리더십/입사후포부/성장과정/일반 중 하나",
-                  "writingStrategy": "이 문항에서 어떤 경험을 어떤 구조로 풀어야 하는지 구체적 전략",
-                  "mustInclude": ["반드시 포함할 키워드나 포인트"],
+                  "writingStrategy": "이 문항에서 어떤 경험을 어떤 구조로 풀어야 하는지 구체적 전략. 3~5문장으로 상세히.",
+                  "mustInclude": ["반드시 포함할 키워드나 포인트 (회사 고유명사 1개 이상 필수)"],
                   "avoid": ["피해야 할 표현이나 접근"],
-                  "exampleOpening": "추천 도입 문장 예시 (이 회사에 특화된)"
+                  "exampleOpening": "추천 도입 문장 예시 (이 회사 제품/서비스 고유명사를 포함한 구체적 첫 문장)"
                 }
               ]
             }
 
             주의사항:
-            - 각 필드를 1~2문장으로 간결하게 작성하세요. 장황한 설명 금지.
+            - 모든 필드에서 "금융 IT", "솔루션 기업" 같은 포괄 표현 금지. 반드시 제품명, 시스템명, 서비스명 등 고유명사를 포함하세요.
+            - coreProducts는 2~4개, competitors는 2~3개 작성하세요.
             - questionGuides는 위에 제시된 자소서 문항 수만큼 생성하세요. 문항이 없으면 빈 배열 []로 두세요.
-            - mustInclude와 avoid는 각각 최대 3개까지만 작성하세요.
-            - writingStrategy는 2문장 이내로 작성하세요.
-            - 총 JSON 길이를 최소화하면서 핵심 정보만 담으세요.
+            - mustInclude에 반드시 회사 제품/서비스 고유명사 1개 이상을 포함하세요.
+            - writingStrategy는 3~5문장으로 상세히 작성하세요.
             """.formatted(
                 jobPosting.getCompanyName() != null ? jobPosting.getCompanyName() : "미상",
                 jobPosting.getCompanyType() != null ? jobPosting.getCompanyType().name() : "UNKNOWN",
