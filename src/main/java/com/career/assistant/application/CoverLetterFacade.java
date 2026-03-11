@@ -111,6 +111,7 @@ public class CoverLetterFacade {
         scoreMap.put("aiDetectionRisk", review.scores().aiDetectionRisk());
         scoreMap.put("logicalStructure", review.scores().logicalStructure());
         scoreMap.put("keywordUsage", review.scores().keywordUsage());
+        scoreMap.put("experienceConsistency", review.scores().experienceConsistency());
 
         return new ReviewResponse(
             review.totalScore(), review.grade(), review.overallComment(),
@@ -445,7 +446,7 @@ public class CoverLetterFacade {
         }
 
         // 문장 단위로 분리하여 charLimit 이내로 자르기
-        String[] sentences = content.split("(?<=[\\.!?。]\\s*)");
+        String[] sentences = content.split("(?<=[.!?。])\\s*");
         StringBuilder trimmed = new StringBuilder();
         for (String sentence : sentences) {
             if (trimmed.length() + sentence.length() > charLimit) {

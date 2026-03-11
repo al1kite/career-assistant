@@ -91,7 +91,7 @@ public class CoverLetterController {
     @Operation(summary = "사용자 수정본 검토", description = "사용자가 수정한 자소서를 제출하면 점수와 개선 방향을 반환합니다")
     @PostMapping("/{jobPostingId}/review")
     public ResponseEntity<?> reviewDraft(@PathVariable Long jobPostingId,
-                                         @RequestBody ReviewRequest request) {
+                                         @Valid @RequestBody ReviewRequest request) {
         try {
             ReviewResponse response = coverLetterFacade.reviewUserDraft(
                 jobPostingId, request.content(), request.questionIndex());

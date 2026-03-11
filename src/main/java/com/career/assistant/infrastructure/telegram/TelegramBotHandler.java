@@ -1,6 +1,5 @@
 package com.career.assistant.infrastructure.telegram;
 
-import com.career.assistant.api.dto.ReviewResponse;
 import com.career.assistant.application.CoverLetterFacade;
 import com.career.assistant.application.interview.InterviewPrepAnalyzer;
 import com.career.assistant.application.interview.InterviewPrepMessageFormatter;
