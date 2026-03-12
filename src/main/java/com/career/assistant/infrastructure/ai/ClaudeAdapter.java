@@ -77,9 +77,24 @@ public class ClaudeAdapter implements AiPort {
                 .timeout(Duration.ofSeconds(120))
                 .block();
 
+            if (response == null) {
+                throw new RuntimeException("Claude API 응답이 null입니다");
+            }
+
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> content = (List<Map<String, Object>>) response.get("content");
-            return (String) content.get(0).get("text");
+            if (content == null || content.isEmpty()) {
+                log.error("Claude API 응답에 content가 없습니다. 응답: {}", response);
+                throw new RuntimeException("Claude API 응답에 content가 비어있습니다");
+            }
+
+            Object text = content.get(0).get("text");
+            if (text == null) {
+                log.error("Claude API content[0]에 text가 없습니다. content: {}", content.get(0));
+                throw new RuntimeException("Claude API 응답에 text가 없습니다");
+            }
+
+            return (String) text;
         } catch (WebClientResponseException e) {
             log.error("Claude API 호출 실패 [{}] - 응답: {}", e.getStatusCode(), e.getResponseBodyAsString());
             throw new RuntimeException("Claude API 호출 실패: " + e.getResponseBodyAsString(), e);
