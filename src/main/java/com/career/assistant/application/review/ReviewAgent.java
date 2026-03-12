@@ -196,20 +196,22 @@ public class ReviewAgent {
             String json = extractJson(response);
             JsonNode root = objectMapper.readTree(json);
 
-            JsonNode scoresNode = root.get("scores");
-            int experienceConsistency = scoresNode.has("experienceConsistency")
-                ? scoresNode.get("experienceConsistency").asInt() : 80;
+            JsonNode scoresNode = root.path("scores");
+            if (scoresNode.isMissingNode() || !scoresNode.isObject()) {
+                log.warn("[에이전트] scores 노드 누락 또는 비정상 — 폴백 적용");
+                return ReviewResult.fallback();
+            }
 
             ReviewResult.Scores scores = new ReviewResult.Scores(
-                scoresNode.get("answerRelevance").asInt(),
-                scoresNode.get("jobFit").asInt(),
-                scoresNode.get("orgFit").asInt(),
-                scoresNode.get("specificity").asInt(),
-                scoresNode.get("authenticity").asInt(),
-                scoresNode.get("aiDetectionRisk").asInt(),
-                scoresNode.get("logicalStructure").asInt(),
-                scoresNode.get("keywordUsage").asInt(),
-                experienceConsistency
+                safeScore(scoresNode, "answerRelevance", 50),
+                safeScore(scoresNode, "jobFit", 50),
+                safeScore(scoresNode, "orgFit", 50),
+                safeScore(scoresNode, "specificity", 50),
+                safeScore(scoresNode, "authenticity", 50),
+                safeScore(scoresNode, "aiDetectionRisk", 50),
+                safeScore(scoresNode, "logicalStructure", 50),
+                safeScore(scoresNode, "keywordUsage", 50),
+                safeScore(scoresNode, "experienceConsistency", 80)
             );
 
             List<String> violations = parseStringArray(root.get("violations"));
@@ -249,6 +251,11 @@ public class ReviewAgent {
         }
 
         return cleaned;
+    }
+
+    private int safeScore(JsonNode scores, String field, int defaultValue) {
+        JsonNode node = scores.path(field);
+        return node.isMissingNode() ? defaultValue : node.asInt(defaultValue);
     }
 
     private List<String> parseStringArray(JsonNode node) {
