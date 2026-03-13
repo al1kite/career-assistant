@@ -71,6 +71,9 @@ public class KptAnalyzer {
     @Value("${github.repos.cs-study}")
     private String csStudyRepo;
 
+    @Value("${github.repos.career-assistant:career-assistant}")
+    private String careerAssistantRepo;
+
     public KptAnalyzer(
         @Qualifier("claudeHaiku") AiPort claude,
         ObjectMapper objectMapper,
@@ -117,6 +120,7 @@ public class KptAnalyzer {
         appendRepoCommits(sb, codingTestRepo, "코딩테스트", sinceUtc);
         appendRepoCommits(sb, blogRepo, "블로그", sinceUtc);
         appendRepoCommits(sb, csStudyRepo, "CS 스터디", sinceUtc);
+        appendRepoCommits(sb, careerAssistantRepo, "자소서 프로젝트", sinceUtc);
 
         return sb.isEmpty() ? "오늘 GitHub 커밋 없음" : sb.toString().strip();
     }
@@ -135,11 +139,23 @@ public class KptAnalyzer {
     }
 
     private String buildUserPrompt(String todayActivity, List<DailyTask> todayTasks) {
-        String tasksData = todayTasks.isEmpty()
-            ? "오늘 아침 브리핑 데이터 없음"
-            : todayTasks.stream()
-                .map(t -> "- [%s] %s".formatted(t.category(), t.action()))
-                .collect(Collectors.joining("\n"));
+        if (todayTasks.isEmpty()) {
+            return """
+                [안내] 오늘은 아침 브리핑이 실행되지 않았습니다 (주말 또는 서버 재시작).
+                추천 태스크 대비 달성률 비교가 불가능하므로, GitHub 커밋 활동만 기반으로 분석하세요.
+                커밋이 있으면 자발적 학습으로 높이 평가하고, completionRate는 커밋 활동량에 비례하여 산정하세요.
+                커밋이 없더라도 주말 휴식은 자연스러운 것이므로 격려해주세요.
+
+                [오늘 GitHub 활동]
+                %s
+
+                위 데이터를 기반으로 KPT JSON을 생성해주세요.
+                """.formatted(todayActivity);
+        }
+
+        String tasksData = todayTasks.stream()
+            .map(t -> "- [%s] %s".formatted(t.category(), t.action()))
+            .collect(Collectors.joining("\n"));
 
         return """
             [오늘 아침 브리핑 추천 태스크]
