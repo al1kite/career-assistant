@@ -113,14 +113,9 @@ public class ReviewAgent {
         // 1차 리뷰는 Sonnet (개선 방향을 결정하는 가장 중요한 리뷰), 이후는 Haiku
         AiPort reviewer = (iterationNum == 1) ? claudeSonnet : claudeHaiku;
 
-        try {
-            log.info("[에이전트] {}차 검토 — 모델: {}", iterationNum, reviewer.getModelName());
-            String response = reviewer.generate(REVIEWER_SYSTEM_PROMPT, userPrompt);
-            return parseReviewResponse(response);
-        } catch (Exception e) {
-            log.error("[에이전트] 검토 중 오류 발생 (iteration {}): {}", iterationNum, e.getMessage());
-            return ReviewResult.fallback();
-        }
+        log.info("[에이전트] {}차 검토 — 모델: {}", iterationNum, reviewer.getModelName());
+        String response = reviewer.generate(REVIEWER_SYSTEM_PROMPT, userPrompt);
+        return parseReviewResponse(response);
     }
 
     /** 하위호환: experiences 없이 호출하면 경험 목록 없이 검토 */
@@ -196,20 +191,22 @@ public class ReviewAgent {
             String json = extractJson(response);
             JsonNode root = objectMapper.readTree(json);
 
-            JsonNode scoresNode = root.get("scores");
-            int experienceConsistency = scoresNode.has("experienceConsistency")
-                ? scoresNode.get("experienceConsistency").asInt() : 80;
+            JsonNode scoresNode = root.path("scores");
+            if (scoresNode.isMissingNode() || !scoresNode.isObject()) {
+                log.warn("[에이전트] 검토 결과에 scores 객체 없음 — 폴백 적용");
+                return ReviewResult.fallback();
+            }
 
             ReviewResult.Scores scores = new ReviewResult.Scores(
-                scoresNode.get("answerRelevance").asInt(),
-                scoresNode.get("jobFit").asInt(),
-                scoresNode.get("orgFit").asInt(),
-                scoresNode.get("specificity").asInt(),
-                scoresNode.get("authenticity").asInt(),
-                scoresNode.get("aiDetectionRisk").asInt(),
-                scoresNode.get("logicalStructure").asInt(),
-                scoresNode.get("keywordUsage").asInt(),
-                experienceConsistency
+                scoresNode.path("answerRelevance").asInt(50),
+                scoresNode.path("jobFit").asInt(50),
+                scoresNode.path("orgFit").asInt(50),
+                scoresNode.path("specificity").asInt(50),
+                scoresNode.path("authenticity").asInt(50),
+                scoresNode.path("aiDetectionRisk").asInt(50),
+                scoresNode.path("logicalStructure").asInt(50),
+                scoresNode.path("keywordUsage").asInt(50),
+                scoresNode.path("experienceConsistency").asInt(80)
             );
 
             List<String> violations = parseStringArray(root.get("violations"));
