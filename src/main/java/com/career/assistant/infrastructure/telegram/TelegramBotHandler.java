@@ -517,15 +517,26 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
         }
     }
 
+    private static final int SEND_TIMEOUT_SECONDS = 30;
+
     private void doSend(String text) {
         SendMessage message = SendMessage.builder()
             .chatId(chatId)
             .text(text)
             .build();
         try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("텔레그램 메시지 전송 실패", e);
+            java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                try {
+                    return execute(message);
+                } catch (TelegramApiException e) {
+                    throw new RuntimeException(e);
+                }
+            }).get(SEND_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.error("텔레그램 메시지 전송 타임아웃 ({}초)", SEND_TIMEOUT_SECONDS);
+        } catch (Exception e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            log.error("텔레그램 메시지 전송 실패", cause);
         }
     }
 
