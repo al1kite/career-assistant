@@ -248,7 +248,11 @@ public class JsoupCrawler {
         if (companyName.isBlank()) {
             String ogTitle = doc.select("meta[property=og:title]").attr("content");
             if (ogTitle.contains("채용공고")) {
-                companyName = ogTitle.split("채용공고")[0].trim();
+                String[] parts = ogTitle.split("채용공고", 2);
+                // "회사명 채용공고 ..." → parts[0], "채용공고 회사명" → parts[1]
+                String before = parts[0].trim();
+                String after = parts.length > 1 ? parts[1].replaceAll("^[\\s\\-–—|]+", "").trim() : "";
+                companyName = !before.isBlank() ? before : after;
             }
         }
 
@@ -351,7 +355,16 @@ public class JsoupCrawler {
         }
 
         if (companyName.isBlank()) {
-            companyName = doc.title().split("채용공고")[0].trim();
+            String title = doc.title();
+            if (title.contains("채용공고")) {
+                String[] parts = title.split("채용공고", 2);
+                String before = parts[0].trim();
+                String after = parts.length > 1 ? parts[1].replaceAll("^[\\s\\-–—|]+", "").trim() : "";
+                companyName = !before.isBlank() ? before : after;
+            }
+            if (companyName.isBlank()) {
+                companyName = title;
+            }
         }
 
         // 직무 설명 보강: og:description 또는 body
