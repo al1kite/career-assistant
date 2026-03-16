@@ -81,8 +81,8 @@ public class ClaudeAdapter implements AiPort {
             List<Map<String, Object>> content = (List<Map<String, Object>>) response.get("content");
             return (String) content.get(0).get("text");
         } catch (WebClientResponseException e) {
-            log.error("Claude API 호출 실패 [{}]", e.getStatusCode());
-            throw new RuntimeException("Claude API 호출 실패: " + e.getStatusCode(), e);
+            log.error("Claude API 호출 실패 [{}] - 응답: {}", e.getStatusCode(), e.getResponseBodyAsString());
+            throw new RuntimeException("Claude API 호출 실패: " + e.getResponseBodyAsString(), e);
         }
     }
 

@@ -50,7 +50,7 @@ public class CompanyAnalyzer {
             }
 
             log.warn("[분석] AI 응답에서 유효한 JSON을 추출할 수 없습니다. 응답 길이: {}", response.length());
-            log.debug("[분석] AI 응답 구조 — 길이: {}, '{' 포함: {}", response.length(), response.contains("{"));
+            log.debug("[분석] AI 응답 앞 300자: {}", response.substring(0, Math.min(300, response.length())));
             return null;
         } catch (Exception e) {
             log.error("[분석] 회사 분석 실패 - {}: {}", jobPosting.getCompanyName(), e.getMessage());

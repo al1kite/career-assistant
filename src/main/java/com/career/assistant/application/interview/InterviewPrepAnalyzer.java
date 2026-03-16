@@ -126,14 +126,16 @@ public class InterviewPrepAnalyzer {
 
         String json = AiResponseParser.extractJson(response);
         if (json == null) {
-            log.warn("[면접준비] JSON 추출 실패. 응답 길이: {}", response.length());
+            String preview = response.substring(0, Math.min(300, response.length()));
+            log.warn("[면접준비] JSON 추출 실패. 응답 미리보기: {}", preview);
             throw new RuntimeException("면접 준비 분석 응답에서 유효한 JSON을 추출할 수 없습니다.");
         }
 
         try {
             return objectMapper.readValue(json, InterviewPrepResult.class);
         } catch (Exception e) {
-            log.warn("[면접준비] JSON 파싱 실패: {}. JSON 길이: {}", e.getMessage(), json.length());
+            String preview = json.substring(0, Math.min(300, json.length()));
+            log.warn("[면접준비] JSON 파싱 실패: {}. 미리보기: {}", e.getMessage(), preview);
             throw new RuntimeException("면접 준비 분석 응답 파싱 실패.", e);
         }
     }
