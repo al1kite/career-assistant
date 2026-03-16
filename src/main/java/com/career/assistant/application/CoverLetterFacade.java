@@ -68,17 +68,11 @@ public class CoverLetterFacade {
 
         int qIdx = questionIndex != null ? questionIndex : 0;
 
-        // 기존 최신 버전 조회 → 새 버전 번호 계산
-        int nextVersion = coverLetterRepository
-            .findTopByJobPostingIdAndQuestionIndexOrderByVersionDesc(jobPostingId, qIdx)
-            .map(cl -> cl.getVersion() + 1)
-            .orElse(1);
-
-        // 문항 텍스트 가져오기
-        String questionText = coverLetterRepository
-            .findTopByJobPostingIdAndQuestionIndexOrderByVersionDesc(jobPostingId, qIdx)
-            .map(CoverLetter::getQuestionText)
-            .orElse(null);
+        // 기존 최신 버전 1회 조회 → 버전 번호 + 문항 텍스트 동시 추출
+        var latestOpt = coverLetterRepository
+            .findTopByJobPostingIdAndQuestionIndexOrderByVersionDesc(jobPostingId, qIdx);
+        int nextVersion = latestOpt.map(cl -> cl.getVersion() + 1).orElse(1);
+        String questionText = latestOpt.map(CoverLetter::getQuestionText).orElse(null);
 
         // charLimit 계산
         Map<Integer, Integer> charLimitByQuestion = deserializeCharLimits(jp);
