@@ -35,7 +35,7 @@ public class BriefingService {
             } catch (LearningAdvisor.NoActivityDataException e) {
                 log.warn("No activity data for briefing: {}", e.getMessage());
                 telegramBotHandler.sendMessage("GitHub 활동 데이터가 없어 브리핑을 생성할 수 없습니다.");
-                return false;
+                return true; // 데이터 없음은 시스템 장애가 아닌 정상 경로
             }
 
             dailyTasksHolder.update(rec.todayTasks());
