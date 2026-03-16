@@ -163,16 +163,14 @@ public class KptAnalyzer {
         String json = extractJson(response);
 
         if (json == null) {
-            String preview = response.substring(0, Math.min(300, response.length()));
-            log.warn("Failed to extract JSON from KPT response. Response preview: {}", preview);
+            log.warn("Failed to extract JSON from KPT response. 응답 길이: {}", response.length());
             throw new RuntimeException("KPT 분석 응답에서 유효한 JSON을 추출할 수 없습니다.");
         }
 
         try {
             return objectMapper.readValue(json, KptResult.class);
         } catch (JsonProcessingException e) {
-            String preview = json.substring(0, Math.min(300, json.length()));
-            log.warn("Failed to parse KPT JSON: {}. JSON preview: {}", e.getMessage(), preview);
+            log.warn("Failed to parse KPT JSON: {}. JSON 길이: {}", e.getMessage(), json.length());
             throw new RuntimeException("KPT 분석 응답 파싱 실패.", e);
         }
     }
