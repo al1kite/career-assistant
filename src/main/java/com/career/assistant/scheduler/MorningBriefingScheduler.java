@@ -19,8 +19,13 @@ public class MorningBriefingScheduler {
     @Scheduled(cron = "0 0 6 * * MON-FRI", zone = "Asia/Seoul")
     public void sendMorningBriefing() {
         try {
-            briefingService.executeBriefing();
-            healthMonitor.recordSuccess(TASK_NAME);
+            boolean success = briefingService.executeBriefing();
+            if (success) {
+                healthMonitor.recordSuccess(TASK_NAME);
+            } else {
+                healthMonitor.recordFailure(TASK_NAME,
+                    new RuntimeException("브리핑 내부 실패 (상세 로그 확인)"));
+            }
         } catch (Exception e) {
             log.error("아침 브리핑 스케줄러 실패", e);
             healthMonitor.recordFailure(TASK_NAME, e);
