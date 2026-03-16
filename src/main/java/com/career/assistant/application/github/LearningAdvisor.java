@@ -104,16 +104,15 @@ public class LearningAdvisor {
         String json = extractJson(response);
 
         if (json == null) {
-            log.warn("Failed to extract JSON from AI response. Response preview: {}",
-                response.substring(0, Math.min(300, response.length())));
+            log.warn("Failed to extract JSON from AI response. 응답 길이: {}", response.length());
             throw new RuntimeException("AI 응답에서 유효한 JSON을 추출할 수 없습니다. 다시 시도해주세요.");
         }
 
         try {
             return objectMapper.readValue(json, LearningRecommendation.class);
         } catch (JsonProcessingException e) {
-            log.warn("Failed to parse learning recommendation JSON: {}. JSON preview: {}",
-                e.getMessage(), json.substring(0, Math.min(300, json.length())));
+            log.warn("Failed to parse learning recommendation JSON: {}. JSON 길이: {}",
+                e.getMessage(), json.length());
             throw new RuntimeException("AI 응답 파싱 실패. 다시 시도해주세요.", e);
         }
     }
