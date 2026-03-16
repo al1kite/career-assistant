@@ -59,6 +59,7 @@ public class JobCollectorScheduler {
             healthMonitor.recordSuccess(DEADLINE_TASK);
         } catch (Exception e) {
             log.error("마감 임박 알림 실패", e);
+            telegramBotHandler.sendMessage("마감 임박 알림 처리에 실패했습니다. 로그를 확인해주세요.");
             healthMonitor.recordFailure(DEADLINE_TASK, e);
         }
     }
