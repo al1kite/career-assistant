@@ -20,4 +20,9 @@ public record InterviewPrepResult(
     public record PracticeProblem(
         String title, String difficulty, String topic, String description
     ) {}
+
+    public static InterviewPrepResult fallback() {
+        return new InterviewPrepResult(List.of(), List.of(), List.of(),
+            new CodingTestPrep(false, null, List.of(), List.of()));
+    }
 }

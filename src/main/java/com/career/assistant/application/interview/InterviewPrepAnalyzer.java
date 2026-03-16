@@ -61,10 +61,15 @@ public class InterviewPrepAnalyzer {
 
         String userPrompt = buildUserPrompt(jobPosting, experiences);
         log.info("[면접준비] AI 분석 요청 — {} (모델: {})", jobPosting.getCompanyName(), ai.getModelName());
-        String response = ai.generate(SYSTEM_PROMPT, userPrompt);
-        log.info("[면접준비] AI 응답 수신 — {}", jobPosting.getCompanyName());
 
-        return parseResponse(response);
+        try {
+            String response = ai.generate(SYSTEM_PROMPT, userPrompt);
+            log.info("[면접준비] AI 응답 수신 — {}", jobPosting.getCompanyName());
+            return parseResponse(response);
+        } catch (Exception e) {
+            log.error("[면접준비] AI 분석 실패 — {}. 폴백 결과 반환", jobPosting.getCompanyName(), e);
+            return InterviewPrepResult.fallback();
+        }
     }
 
     private String buildUserPrompt(JobPosting jobPosting, List<UserExperience> experiences) {
@@ -121,16 +126,14 @@ public class InterviewPrepAnalyzer {
 
         String json = AiResponseParser.extractJson(response);
         if (json == null) {
-            String preview = response.substring(0, Math.min(300, response.length()));
-            log.warn("[면접준비] JSON 추출 실패. 응답 미리보기: {}", preview);
+            log.warn("[면접준비] JSON 추출 실패. 응답 길이: {}", response.length());
             throw new RuntimeException("면접 준비 분석 응답에서 유효한 JSON을 추출할 수 없습니다.");
         }
 
         try {
             return objectMapper.readValue(json, InterviewPrepResult.class);
         } catch (Exception e) {
-            String preview = json.substring(0, Math.min(300, json.length()));
-            log.warn("[면접준비] JSON 파싱 실패: {}. 미리보기: {}", e.getMessage(), preview);
+            log.warn("[면접준비] JSON 파싱 실패: {}. JSON 길이: {}", e.getMessage(), json.length());
             throw new RuntimeException("면접 준비 분석 응답 파싱 실패.", e);
         }
     }
