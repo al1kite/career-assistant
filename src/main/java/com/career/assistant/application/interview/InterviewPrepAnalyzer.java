@@ -61,10 +61,15 @@ public class InterviewPrepAnalyzer {
 
         String userPrompt = buildUserPrompt(jobPosting, experiences);
         log.info("[면접준비] AI 분석 요청 — {} (모델: {})", jobPosting.getCompanyName(), ai.getModelName());
-        String response = ai.generate(SYSTEM_PROMPT, userPrompt);
-        log.info("[면접준비] AI 응답 수신 — {}", jobPosting.getCompanyName());
 
-        return parseResponse(response);
+        try {
+            String response = ai.generate(SYSTEM_PROMPT, userPrompt);
+            log.info("[면접준비] AI 응답 수신 — {}", jobPosting.getCompanyName());
+            return parseResponse(response);
+        } catch (Exception e) {
+            log.error("[면접준비] AI 분석 실패 — {}. 폴백 결과 반환", jobPosting.getCompanyName(), e);
+            return InterviewPrepResult.fallback();
+        }
     }
 
     private String buildUserPrompt(JobPosting jobPosting, List<UserExperience> experiences) {

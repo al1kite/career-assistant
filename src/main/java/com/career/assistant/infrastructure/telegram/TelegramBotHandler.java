@@ -199,14 +199,14 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
 
         sendMessage("면접 예상 질문 생성 중... (회사 분석 기반)");
 
-        try {
-            InterviewPrepResult result = interviewPrepAnalyzer.analyze(jobPosting);
-            String message = interviewPrepMessageFormatter.format(jobPosting.getCompanyName(), result);
-            sendMessage(message);
-        } catch (Exception e) {
-            log.error("면접 준비 생성 실패 - {}", jobPosting.getCompanyName(), e);
-            sendMessage("면접 준비 가이드 생성에 실패했습니다: " + e.getMessage());
+        InterviewPrepResult result = interviewPrepAnalyzer.analyze(jobPosting);
+        if (result.behavioralQuestions().isEmpty() && result.technicalQuestions().isEmpty()
+            && result.experienceQuestions().isEmpty()) {
+            sendMessage("면접 준비 분석에 실패했습니다. 잠시 후 다시 시도해주세요.");
+            return;
         }
+        String message = interviewPrepMessageFormatter.format(jobPosting.getCompanyName(), result);
+        sendMessage(message);
     }
 
     // ── 자소서 ──────────────────────────────────────────
