@@ -14,9 +14,12 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class KptScheduler {
 
+    private static final String TASK_NAME = "KPT 분석";
+
     private final KptAnalyzer kptAnalyzer;
     private final KptMessageFormatter kptMessageFormatter;
     private final TelegramBotHandler telegramBotHandler;
+    private final SchedulerHealthMonitor healthMonitor;
 
     @Scheduled(cron = "0 0 22 * * *", zone = "Asia/Seoul")
     public void executeKptAnalysis() {
@@ -27,9 +30,11 @@ public class KptScheduler {
             String formatted = kptMessageFormatter.formatResult(record);
             telegramBotHandler.sendMessage(formatted);
             log.info("KPT evening analysis completed");
+            healthMonitor.recordSuccess(TASK_NAME);
         } catch (Exception e) {
             log.error("KPT analysis failed", e);
             telegramBotHandler.sendMessage("KPT 분석에 실패했습니다. 로그를 확인해주세요.");
+            healthMonitor.recordFailure(TASK_NAME, e);
         }
     }
 }
