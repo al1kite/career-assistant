@@ -114,8 +114,13 @@ public class ReviewAgent {
         AiPort reviewer = (iterationNum == 1) ? claudeSonnet : claudeHaiku;
 
         log.info("[에이전트] {}차 검토 — 모델: {}", iterationNum, reviewer.getModelName());
-        String response = reviewer.generate(REVIEWER_SYSTEM_PROMPT, userPrompt);
-        return parseReviewResponse(response);
+        try {
+            String response = reviewer.generate(REVIEWER_SYSTEM_PROMPT, userPrompt);
+            return parseReviewResponse(response);
+        } catch (Exception e) {
+            throw new ReviewGenerationException(
+                "리뷰 생성 실패 (%d차, 모델: %s)".formatted(iterationNum, reviewer.getModelName()), e);
+        }
     }
 
     /** 하위호환: experiences 없이 호출하면 경험 목록 없이 검토 */

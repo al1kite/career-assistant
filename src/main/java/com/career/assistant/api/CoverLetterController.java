@@ -11,6 +11,7 @@ import com.career.assistant.api.dto.ReviewRequest;
 import com.career.assistant.api.dto.ReviewResponse;
 import com.career.assistant.api.dto.ReviewTrendResponse;
 import com.career.assistant.application.CoverLetterFacade;
+import com.career.assistant.application.review.ReviewGenerationException;
 import com.career.assistant.domain.coverletter.CoverLetter;
 import com.career.assistant.domain.coverletter.CoverLetterRepository;
 import com.career.assistant.domain.jobposting.JobPosting;
@@ -98,6 +99,10 @@ public class CoverLetterController {
             return ResponseEntity.ok(response);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (ReviewGenerationException e) {
+            log.error("[API] 리뷰 생성 실패 — jobPostingId: {}", jobPostingId, e);
+            return ResponseEntity.internalServerError()
+                .body(Map.of("error", "리뷰 생성에 실패했습니다. 잠시 후 다시 시도해주세요."));
         }
     }
 
