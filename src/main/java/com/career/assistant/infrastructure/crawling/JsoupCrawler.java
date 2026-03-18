@@ -247,13 +247,7 @@ public class JsoupCrawler {
         // 2순위: og:title에서 회사명 추출 ("SK이터닉스 채용공고 - ..." 형태)
         if (companyName.isBlank()) {
             String ogTitle = doc.select("meta[property=og:title]").attr("content");
-            if (ogTitle.contains("채용공고")) {
-                String[] parts = ogTitle.split("채용공고", 2);
-                // "회사명 채용공고 ..." → parts[0], "채용공고 회사명" → parts[1]
-                String before = parts[0].trim();
-                String after = parts.length > 1 ? parts[1].replaceAll("^[\\s\\-–—|]+", "").trim() : "";
-                companyName = !before.isBlank() ? before : after;
-            }
+            companyName = parseCompanyNameFromTitle(ogTitle);
         }
 
         // 3순위: __NEXT_DATA__에서 시도 (Next.js SSG)
@@ -356,12 +350,7 @@ public class JsoupCrawler {
 
         if (companyName.isBlank()) {
             String title = doc.title();
-            if (title.contains("채용공고")) {
-                String[] parts = title.split("채용공고", 2);
-                String before = parts[0].trim();
-                String after = parts.length > 1 ? parts[1].replaceAll("^[\\s\\-–—|]+", "").trim() : "";
-                companyName = !before.isBlank() ? before : after;
-            }
+            companyName = parseCompanyNameFromTitle(title);
             if (companyName.isBlank()) {
                 companyName = title;
             }
@@ -626,6 +615,14 @@ public class JsoupCrawler {
             log.info("HTML 정규식으로 자소서 문항 {} 개 추출", questions.size());
         }
         return questions;
+    }
+
+    private String parseCompanyNameFromTitle(String title) {
+        if (title == null || !title.contains("채용공고")) return "";
+        String[] parts = title.split("채용공고", 2);
+        String before = parts[0].trim();
+        String after = parts.length > 1 ? parts[1].replaceAll("^[\\s\\-–—|]+", "").trim() : "";
+        return !before.isBlank() ? before : after;
     }
 
     private String extractCompanyName(Document doc, String url) {
