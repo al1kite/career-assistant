@@ -79,7 +79,7 @@ public class BriefingService {
         return rec.gaps().stream()
             .max(Comparator.comparingInt(this::severityPriority)
                 .thenComparingInt(LearningRecommendation.LearningGap::gapDays))
-            .orElse(rec.gaps().get(0));
+            .orElseGet(() -> rec.gaps().get(0));
     }
 
     private int severityPriority(LearningRecommendation.LearningGap gap) {
