@@ -233,7 +233,7 @@ public class CoverLetterFacade {
     private List<CoverLetter> generateCoverLetters(JobPosting jobPosting, List<EssayQuestion> essayQuestions) {
         AiPort ai = aiRouter.route(jobPosting.getCompanyType());
 
-        if (userExperienceRepository.count() == 0) {
+        if (!userExperienceRepository.existsAny()) {
             log.warn("[경고] 등록된 경험(UserExperience)이 0건입니다. 자소서 품질이 크게 저하될 수 있습니다. " +
                 "경험 데이터를 먼저 등록해주세요.");
         }
