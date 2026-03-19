@@ -18,7 +18,9 @@ public class CoverLetterPromptBuilder {
 
     private static final String EXPERIENCE_GROUNDING_RULES = """
             [경험 사용 규칙 — 절대 위반 금지]
-            아래 [지원자 경험]에 제공된 경험만 사용하세요.
+            아래 제공된 경험만 사용하세요.
+            [주력 경험]이 제공되면 승(承) 단락의 핵심 소재로 사용하세요. 이 경험을 깊이 있게 풀어야 합니다.
+            [보조 경험]이 제공되면 다른 단락에서 간접적으로 언급하거나 역량 보충 근거로 활용하세요.
             제공되지 않은 프로젝트, 회사, 수상 경력, 활동을 절대 지어내지 마세요.
             경험의 제목, 기간, 기술스택, 성과 수치를 있는 그대로 인용하세요.
             없는 경험을 쓰면 즉시 탈락입니다.""";
@@ -141,9 +143,16 @@ public class CoverLetterPromptBuilder {
 
     public String buildForQuestion(JobPosting jobPosting, List<UserExperience> experiences,
                                     EssayQuestion question) {
-        String experienceSummary = experiences.stream()
-            .map(this::formatExperience)
-            .collect(Collectors.joining("\n\n"));
+        UserExperience primary = experiences == null || experiences.isEmpty() ? null : experiences.get(0);
+        List<UserExperience> secondary = experiences == null || experiences.size() <= 1
+            ? List.of()
+            : experiences.subList(1, experiences.size());
+        return buildForQuestion(jobPosting, primary, secondary, question);
+    }
+
+    public String buildForQuestion(JobPosting jobPosting, UserExperience primary,
+                                    List<UserExperience> secondary, EssayQuestion question) {
+        String experienceSummary = formatQuestionExperiences(primary, secondary);
 
         String tone = resolveTone(jobPosting.getCompanyType());
         String questionType = classifyQuestionType(question.questionText());
@@ -231,7 +240,6 @@ public class CoverLetterPromptBuilder {
             직무설명: %s
             자격요건: %s
 
-            [지원자 경험]
             %s""".formatted(
                 charLimit,
                 targetMin,
@@ -271,9 +279,22 @@ public class CoverLetterPromptBuilder {
                                            String reviewFeedbackJson, int iterationNum,
                                            String targetedStrategy, int charLimit,
                                            String userMessage) {
-        String experienceSummary = experiences.stream()
-            .map(this::formatExperience)
-            .collect(Collectors.joining("\n\n"));
+        UserExperience primary = experiences == null || experiences.isEmpty() ? null : experiences.get(0);
+        List<UserExperience> secondary = experiences == null || experiences.size() <= 1
+            ? List.of()
+            : experiences.subList(1, experiences.size());
+        return buildImprovementPrompt(
+            jobPosting, primary, secondary, question, previousDraft, reviewFeedbackJson,
+            iterationNum, targetedStrategy, charLimit, userMessage
+        );
+    }
+
+    public String buildImprovementPrompt(JobPosting jobPosting, UserExperience primary,
+                                           List<UserExperience> secondary, String question, String previousDraft,
+                                           String reviewFeedbackJson, int iterationNum,
+                                           String targetedStrategy, int charLimit,
+                                           String userMessage) {
+        String experienceSummary = formatQuestionExperiences(primary, secondary);
 
         String tone = resolveTone(jobPosting.getCompanyType());
         String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
@@ -339,10 +360,9 @@ public class CoverLetterPromptBuilder {
 
             %s
 
-            [지원자 경험]
             %s
 
-            위 피드백을 모두 반영하여 개선된 자소서를 작성하세요. 자소서 본문만 출력하세요.""".formatted(
+            위 피드백을 모두 반영하여 개선된 자소서를 작성하세요. 주력 경험을 중심으로 유지하되, 피드백에 따라 서술을 개선하세요. 자소서 본문만 출력하세요.""".formatted(
                 charLimit,
                 userMessageSection,
                 improvementSection,
@@ -680,6 +700,35 @@ public class CoverLetterPromptBuilder {
                 "정확히 47일. XX시스템 안정화에 투입된 시간입니다. 매일 새벽 4시에 모니터링 대시보드를 열었고, 장애 알림 빈도가 하루 12건에서 0.8건으로 줄어드는 걸 지켜봤습니다. 안정화율 94%에서 99.2%. 그 숫자가 저에게 확신을 줬습니다."
                 (위 예시의 구조와 밀도를 참고하되, 실제 회사와 지원자 경험에 맞게 새로 쓰세요.)""";
         };
+    }
+
+    /**
+     * 경험 목록을 주력/보조로 구분하여 포맷합니다.
+     * 첫 번째 경험 = 주력, 나머지 = 보조.
+     */
+    private String formatQuestionExperiences(UserExperience primary, List<UserExperience> secondary) {
+        if (primary == null && (secondary == null || secondary.isEmpty())) {
+            return "(등록된 경험 없음)";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        if (primary != null) {
+            sb.append("[이 문항의 주력 경험 — 승(承) 단락에서 이 경험을 깊이 있게 서술하세요]\n");
+            sb.append(formatExperience(primary));
+        }
+
+        if (secondary != null && !secondary.isEmpty()) {
+            if (!sb.isEmpty()) {
+                sb.append("\n\n");
+            }
+            sb.append("[보조 경험 — 필요 시 간접적으로 언급할 수 있지만, 주력 경험이 중심이어야 합니다]");
+            for (int i = 0; i < secondary.size(); i++) {
+                sb.append("\n").append(formatExperience(secondary.get(i)));
+                if (i < secondary.size() - 1) sb.append("\n");
+            }
+        }
+
+        return sb.toString();
     }
 
     private String formatExperience(UserExperience e) {

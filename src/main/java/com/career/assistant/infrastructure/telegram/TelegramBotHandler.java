@@ -20,6 +20,10 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -43,6 +47,8 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
     private final InterviewPrepMessageFormatter interviewPrepMessageFormatter;
     private final ObjectMapper objectMapper;
     private final String chatId;
+    private final ExecutorService telegramSendExecutor = Executors.newSingleThreadExecutor(
+        r -> { Thread t = new Thread(r, "telegram-send"); t.setDaemon(true); return t; });
 
     public TelegramBotHandler(
         CoverLetterFacade coverLetterFacade,
@@ -517,15 +523,32 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
         }
     }
 
+    private static final int SEND_TIMEOUT_SECONDS = 30;
+
     private void doSend(String text) {
         SendMessage message = SendMessage.builder()
             .chatId(chatId)
             .text(text)
             .build();
+        CompletableFuture<?> future = CompletableFuture.supplyAsync(() -> {
+            try {
+                return execute(message);
+            } catch (TelegramApiException e) {
+                throw new RuntimeException(e);
+            }
+        }, telegramSendExecutor);
         try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("텔레그램 메시지 전송 실패", e);
+            future.get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            future.cancel(true);
+            log.error("텔레그램 메시지 전송 타임아웃 ({}초)", SEND_TIMEOUT_SECONDS);
+        } catch (InterruptedException e) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            log.warn("텔레그램 메시지 전송 중 인터럽트 발생");
+        } catch (Exception e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            log.error("텔레그램 메시지 전송 실패", cause);
         }
     }
 
