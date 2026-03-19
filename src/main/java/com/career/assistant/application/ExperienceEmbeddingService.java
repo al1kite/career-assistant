@@ -45,14 +45,24 @@ public class ExperienceEmbeddingService {
     }
 
     public List<UserExperience> retrieveRelevant(String query, int topK) {
+        return retrieveRelevant(query, topK, Set.of());
+    }
+
+    public List<UserExperience> retrieveRelevant(String query, int topK, Set<Long> excludeIds) {
         if (!embeddingService.isAvailable() || vectorStore.isEmpty()) {
             log.debug("[벡터] 비활성 또는 빈 스토어 — findAll 폴백");
-            return userExperienceRepository.findAll();
+            return filterExcluded(userExperienceRepository.findAll(), excludeIds);
         }
 
         try {
             float[] queryVector = embeddingService.embed(query);
-            List<Long> ids = vectorStore.search(queryVector, topK);
+            List<Long> ids = vectorStore.search(queryVector, topK, excludeIds);
+
+            // 제외 후 결과 0건이면 제외 없이 재검색 (폴백)
+            if (ids.isEmpty() && !excludeIds.isEmpty()) {
+                log.info("[벡터] 제외 후 결과 0건 — excludeIds 무시하고 재검색");
+                ids = vectorStore.search(queryVector, topK);
+            }
 
             if (ids.isEmpty()) {
                 return userExperienceRepository.findAll();
@@ -67,12 +77,21 @@ public class ExperienceEmbeddingService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
-            log.info("[벡터] 쿼리에서 {}건 검색 (전체 {}건 중)", ordered.size(), vectorStore.size());
+            log.info("[벡터] 쿼리에서 {}건 검색 (전체 {}건 중, 제외 {}건)", ordered.size(), vectorStore.size(), excludeIds.size());
             return ordered;
         } catch (Exception e) {
             log.warn("[벡터] 검색 실패 — findAll 폴백: {}", e.getMessage());
-            return userExperienceRepository.findAll();
+            return filterExcluded(userExperienceRepository.findAll(), excludeIds);
         }
+    }
+
+    private List<UserExperience> filterExcluded(List<UserExperience> experiences, Set<Long> excludeIds) {
+        if (excludeIds.isEmpty()) {
+            return experiences;
+        }
+        return experiences.stream()
+            .filter(exp -> !excludeIds.contains(exp.getId()))
+            .collect(Collectors.toList());
     }
 
     public void indexExperience(UserExperience exp) {
