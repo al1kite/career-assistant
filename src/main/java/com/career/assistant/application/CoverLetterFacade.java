@@ -24,9 +24,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Slf4j
 @Service
@@ -45,6 +47,7 @@ public class CoverLetterFacade {
     private final CompanyClassifier companyClassifier;
     private final CompanyAnalyzer companyAnalyzer;
     private final CoverLetterPromptBuilder promptBuilder;
+    private final CoverLetterStrategyPlanner strategyPlanner;
     private final AiRouter aiRouter;
     private final ObjectMapper objectMapper;
     private final ReviewAgent reviewAgent;
@@ -143,10 +146,24 @@ public class CoverLetterFacade {
 
         log.info("[개선] 기존 자소서 추가 개선 시작 - 회사: {}, 문항 {}개", jp.getCompanyName(), latestByQuestion.size());
 
-        for (CoverLetter latest : latestByQuestion.values()) {
+        Set<Long> usedPrimaryIds = new LinkedHashSet<>();
+        List<CoverLetter> latestLetters = latestByQuestion.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .map(Map.Entry::getValue)
+            .toList();
+
+        for (CoverLetter latest : latestLetters) {
             int qIdx = latest.getQuestionIndex() != null ? latest.getQuestionIndex() : 0;
             int charLimit = charLimitByQuestion.getOrDefault(qIdx, 1000);
-            List<UserExperience> experiences = retrieveExperiencesOrFallback(jp, latest.getQuestionText());
+            List<UserExperience> experiences = retrieveExperiencesOrFallback(
+                jp, latest.getQuestionText(), usedPrimaryIds);
+            UserExperience primary = getPrimaryExperience(experiences);
+            if (primary != null) {
+                usedPrimaryIds.add(primary.getId());
+            }
+
+            log.info("[RAG] 문항 {} 검색된 경험 {}건, 주력 경험 ID: {}",
+                qIdx, experiences.size(), primary != null ? primary.getId() : "없음");
             CoverLetter improved = generateWithReviewLoop(
                 latest, jp, experiences, ai, latest.getQuestionText(), null, charLimit, userMessage);
             results.add(improved);
@@ -233,6 +250,11 @@ public class CoverLetterFacade {
     private List<CoverLetter> generateCoverLetters(JobPosting jobPosting, List<EssayQuestion> essayQuestions) {
         AiPort ai = aiRouter.route(jobPosting.getCompanyType());
 
+        if (!userExperienceRepository.existsAny()) {
+            log.warn("[경고] 등록된 경험(UserExperience)이 0건입니다. 자소서 품질이 크게 저하될 수 있습니다. " +
+                "경험 데이터를 먼저 등록해주세요.");
+        }
+
         jobPosting.markReviewing();
 
         if (essayQuestions == null || essayQuestions.isEmpty()) {
@@ -255,12 +277,31 @@ public class CoverLetterFacade {
             return List.of(finalLetter);
         }
 
-        List<CoverLetter> finalLetters = new ArrayList<>();
-        for (EssayQuestion question : essayQuestions) {
-            List<UserExperience> experiences = retrieveExperiencesOrFallback(jobPosting, question.questionText());
-            log.info("[RAG] 문항 {} 검색된 경험 {}건", question.number(), experiences.size());
+        // 전략 수립 (문항 2개 이상일 때)
+        String masterPlan = null;
+        try {
+            List<UserExperience> allExperiences = userExperienceRepository.findAll();
+            masterPlan = strategyPlanner.planStrategy(jobPosting, essayQuestions, allExperiences);
+        } catch (Exception e) {
+            log.warn("[전략] 전략 수립 중 오류 — 개별 생성 방식으로 진행: {}", e.getMessage());
+        }
 
-            String prompt = promptBuilder.buildForQuestion(jobPosting, experiences, question);
+        List<CoverLetter> finalLetters = new ArrayList<>();
+        Set<Long> usedPrimaryIds = new LinkedHashSet<>();
+        for (EssayQuestion question : essayQuestions) {
+            List<UserExperience> experiences = retrieveExperiencesOrFallback(
+                jobPosting, question.questionText(), usedPrimaryIds);
+            UserExperience primary = getPrimaryExperience(experiences);
+            List<UserExperience> secondary = getSecondaryExperiences(experiences);
+
+            if (primary != null) {
+                usedPrimaryIds.add(primary.getId());
+            }
+
+            log.info("[RAG] 문항 {} 검색된 경험 {}건, 주력 경험 ID: {}",
+                question.number(), experiences.size(), primary != null ? primary.getId() : "없음");
+
+            String prompt = promptBuilder.buildForQuestion(jobPosting, primary, secondary, question, masterPlan);
             int charLimit = question.charLimit() > 0 ? question.charLimit() : 1000;
             String content = enforceCharLimit(ai.generate(prompt), charLimit);
 
@@ -419,15 +460,15 @@ public class CoverLetterFacade {
 
     String getFixAdvice(String field, int score) {
         return switch (field) {
-            case "answerRelevance" -> "첫 문장부터 질문 키워드에 직접 응답하세요. 질문이 묻는 것에 정면으로 답하세요.";
-            case "jobFit" -> "채용공고 자격요건의 기술 키워드를 본인 경험과 직접 연결하세요. 구체적 프로젝트와 성과를 매칭하세요.";
-            case "orgFit" -> "회사 분석의 핵심 가치/문화를 구체적으로 언급하세요. 이 회사만의 특성이 드러나야 합니다.";
-            case "specificity" -> "'많은 개선'→'응답시간 2.3초→0.4초'로 교체하세요. 숫자, 프로젝트명, KPI를 반드시 포함하세요.";
-            case "authenticity" -> "이 지원자만 쓸 수 있는 구체적 장면을 추가하세요. 날짜, 시간, 감정, 오감 디테일을 녹이세요.";
-            case "aiDetectionRisk" -> "어미 반복을 깨고, 구어체 전환어('솔직히', '돌이켜보면')를 추가하고, 감정 표현을 넣으세요.";
-            case "logicalStructure" -> "기승전결 순서를 점검하세요. 단락 간 논리 연결이 자연스러운지 확인하고, 비약이 있으면 연결 문장을 추가하세요.";
-            case "keywordUsage" -> "채용공고의 핵심 키워드 3~5개를 추출하여 문맥에 맞게 자연스럽게 포함하세요.";
-            case "experienceConsistency" -> "제공된 경험 목록에 없는 프로젝트나 경력을 삭제하세요. 실제 경험만 정확히 인용하세요.";
+            case "answerRelevance" -> "[기준5] 첫 문장부터 질문 키워드에 직접 응답하세요. 질문이 묻는 것에 정면으로 답하고, 문항 하위 질문을 빠짐없이 다루세요.";
+            case "jobFit" -> "[기준1] 채용공고 자격요건의 기술 키워드를 본인 경험과 직접 연결하세요. 구체적 프로젝트와 성과를 매칭하세요.";
+            case "orgFit" -> "[기준2,8] 회사 분석의 핵심 가치/문화를 구체적으로 언급하세요. 기업 고유명사 2개 이상 필수. 이 회사가 아니면 안 되는 절실함을 보여주세요.";
+            case "specificity" -> "[기준4] '많은 개선'→'응답시간 2.3초→0.4초'로 교체하세요. 숫자, 프로젝트명, KPI를 반드시 포함하세요.";
+            case "authenticity" -> "[기준3,8] 이 지원자만 쓸 수 있는 구체적 장면을 추가하세요. 진부한 표현을 제거하고, 날짜/시간/감정 등 생생한 디테일을 녹이세요.";
+            case "aiDetectionRisk" -> "[기준3] 어미 반복을 깨고, 구어체 전환어('솔직히', '돌이켜보면')를 추가하고, 감정 표현을 넣으세요.";
+            case "logicalStructure" -> "[기준6] 기승전결 순서를 점검하세요. 불필요한 수식어를 삭제하고, 단락 간 논리 연결이 자연스러운지 확인하세요.";
+            case "keywordUsage" -> "[기준1] 채용공고의 핵심 키워드 3~5개를 추출하여 문맥에 맞게 자연스럽게 포함하세요.";
+            case "experienceConsistency" -> "[기준4] 제공된 경험 목록에 없는 프로젝트나 경력을 삭제하세요. 실제 경험만 정확히 인용하세요.";
             default -> "해당 항목의 점수를 높이기 위해 구체성과 관련성을 강화하세요.";
         };
     }
@@ -480,32 +521,99 @@ public class CoverLetterFacade {
     }
 
     private List<UserExperience> retrieveExperiencesOrFallback(JobPosting jobPosting, String questionText) {
+        return retrieveExperiencesOrFallback(jobPosting, questionText, Set.of());
+    }
+
+    private List<UserExperience> retrieveExperiencesOrFallback(
+        JobPosting jobPosting, String questionText, Set<Long> excludeIds
+    ) {
         try {
             String query = buildRetrievalQuery(jobPosting, questionText);
-            return experienceEmbeddingService.retrieveRelevant(query);
+            return experienceEmbeddingService.retrieveRelevant(query, 5, excludeIds);
         } catch (Exception e) {
             log.warn("[RAG] 벡터 검색 실패 — findAll 폴백: {}", e.getMessage());
-            return userExperienceRepository.findAll();
+            List<UserExperience> all = userExperienceRepository.findAll();
+            if (excludeIds.isEmpty()) return all;
+            List<UserExperience> filtered = all.stream()
+                .filter(exp -> !excludeIds.contains(exp.getId()))
+                .toList();
+            return filtered.isEmpty() ? all : filtered;
         }
     }
 
+    private UserExperience getPrimaryExperience(List<UserExperience> experiences) {
+        return experiences.isEmpty() ? null : experiences.get(0);
+    }
+
+    private List<UserExperience> getSecondaryExperiences(List<UserExperience> experiences) {
+        return experiences.size() <= 1 ? List.of() : experiences.subList(1, experiences.size());
+    }
+
     private String buildRetrievalQuery(JobPosting jobPosting, String questionText) {
+        // 문항 없음 (단일 자소서): 기존 로직 유지
+        if (questionText == null || questionText.isBlank()) {
+            StringBuilder sb = new StringBuilder();
+            if (jobPosting.getCompanyName() != null) {
+                sb.append(jobPosting.getCompanyName()).append(" ");
+            }
+            if (jobPosting.getJobDescription() != null) {
+                sb.append(jobPosting.getJobDescription(), 0,
+                    Math.min(500, jobPosting.getJobDescription().length())).append(" ");
+            }
+            if (jobPosting.getRequirements() != null) {
+                sb.append(jobPosting.getRequirements(), 0,
+                    Math.min(300, jobPosting.getRequirements().length())).append(" ");
+            }
+            return sb.toString().trim();
+        }
+
+        // 문항 있음: 문항 중심 쿼리 (문항텍스트 비중 ~40%+)
         StringBuilder sb = new StringBuilder();
+        sb.append(questionText).append(" ");
+        sb.append(retrievalKeywords(questionText)).append(" ");
         if (jobPosting.getCompanyName() != null) {
             sb.append(jobPosting.getCompanyName()).append(" ");
         }
         if (jobPosting.getJobDescription() != null) {
             sb.append(jobPosting.getJobDescription(), 0,
-                Math.min(500, jobPosting.getJobDescription().length())).append(" ");
+                Math.min(100, jobPosting.getJobDescription().length())).append(" ");
         }
         if (jobPosting.getRequirements() != null) {
             sb.append(jobPosting.getRequirements(), 0,
-                Math.min(300, jobPosting.getRequirements().length())).append(" ");
-        }
-        if (questionText != null) {
-            sb.append(questionText);
+                Math.min(50, jobPosting.getRequirements().length()));
         }
         return sb.toString().trim();
+    }
+
+    private String classifyForRetrieval(String questionText) {
+        String q = questionText.toLowerCase();
+        if (q.contains("지원동기") || q.contains("지원 동기")
+            || (q.contains("왜") && q.contains("회사"))
+            || (q.contains("선택") && q.contains("이유"))
+            || q.contains("지원하게 된")) return "지원동기";
+        if (q.contains("역량") || q.contains("강점") || q.contains("능력") || q.contains("직무")
+            || q.contains("전문") || q.contains("기술") || q.contains("경쟁력")) return "핵심역량";
+        if (q.contains("문제") || q.contains("해결") || q.contains("도전") || q.contains("어려움")
+            || q.contains("극복") || q.contains("실패") || q.contains("위기")) return "문제해결";
+        if (q.contains("협업") || q.contains("리더") || q.contains("팀") || q.contains("소통")
+            || q.contains("갈등") || q.contains("설득") || q.contains("커뮤니케이션") || q.contains("조직")) return "협업리더십";
+        if ((q.contains("입사") && q.contains("후")) || q.contains("포부") || q.contains("계획")
+            || q.contains("비전") || q.contains("목표") || q.contains("각오")) return "입사후포부";
+        if (q.contains("성장") || q.contains("가치") || q.contains("인생") || q.contains("신념")
+            || q.contains("좌우명") || q.contains("성격") || q.contains("장단점") || q.contains("본인 소개")) return "성장과정";
+        return "일반";
+    }
+
+    private String retrievalKeywords(String questionText) {
+        return switch (classifyForRetrieval(questionText)) {
+            case "지원동기" -> "동기 관심 계기 선택 이유";
+            case "핵심역량" -> "역량 기술 성과 전문성";
+            case "문제해결" -> "문제 해결 도전 극복 장애";
+            case "협업리더십" -> "협업 팀 리더 소통 갈등 조율";
+            case "입사후포부" -> "목표 계획 비전 성장 기여";
+            case "성장과정" -> "가치관 경험 전환점 성장";
+            default -> "";
+        };
     }
 
     private LocalDate parseDeadline(String deadline) {

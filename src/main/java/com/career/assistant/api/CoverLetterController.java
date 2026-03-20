@@ -10,6 +10,7 @@ import com.career.assistant.api.dto.ImproveRequest;
 import com.career.assistant.api.dto.ReviewRequest;
 import com.career.assistant.api.dto.ReviewResponse;
 import com.career.assistant.api.dto.ReviewTrendResponse;
+import com.career.assistant.application.CompanyAnalyzer;
 import com.career.assistant.application.CoverLetterFacade;
 import com.career.assistant.application.review.ReviewGenerationException;
 import com.career.assistant.domain.coverletter.CoverLetter;
@@ -18,15 +19,19 @@ import com.career.assistant.domain.jobposting.JobPosting;
 import com.career.assistant.domain.jobposting.JobPostingRepository;
 import com.career.assistant.infrastructure.crawling.CrawledJobInfo;
 import com.career.assistant.infrastructure.crawling.CrawlingException;
+import com.career.assistant.infrastructure.crawling.EssayQuestion;
 import com.career.assistant.infrastructure.crawling.JsoupCrawler;
+import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -42,8 +47,15 @@ public class CoverLetterController {
     private final CoverLetterFacade coverLetterFacade;
     private final CoverLetterRepository coverLetterRepository;
     private final JobPostingRepository jobPostingRepository;
+    private final CompanyAnalyzer companyAnalyzer;
     private final JsoupCrawler jsoupCrawler;
     private final ObjectMapper objectMapper;
+
+    private static final ObjectMapper LENIENT_MAPPER = JsonMapper.builder()
+        .enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
+        .enable(JsonReadFeature.ALLOW_TRAILING_COMMA)
+        .enable(JsonReadFeature.ALLOW_SINGLE_QUOTES)
+        .build();
 
     @Operation(summary = "공고 미리보기 (크롤링만)", description = "URL을 크롤링하여 회사명, 직무설명, 자소서 문항을 미리 확인합니다. 자소서는 생성하지 않습니다.")
     @GetMapping("/preview")
@@ -162,28 +174,52 @@ public class CoverLetterController {
         return ResponseEntity.ok(responses);
     }
 
-    @Operation(summary = "회사 분석 결과 조회", description = "AI가 생성한 회사 심층 분석 및 문항별 작성 가이드를 조회합니다")
+    @Operation(summary = "회사 분석 결과 조회", description = "AI가 생성한 회사 심층 분석 및 문항별 작성 가이드를 조회합니다. 분석이 없으면 자동 생성합니다.")
+    @Transactional
     @GetMapping("/analysis")
     public ResponseEntity<?> getAnalysis(@RequestParam Long jobPostingId) {
         return jobPostingRepository.findById(jobPostingId)
             .map(jp -> {
                 String analysis = jp.getCompanyAnalysis();
+
+                // 분석이 없으면 자동 생성
                 if (analysis == null || analysis.isBlank()) {
-                    return ResponseEntity.ok(Map.of(
-                        "jobPostingId", jobPostingId,
-                        "companyName", jp.getCompanyName() != null ? jp.getCompanyName() : "",
-                        "analysis", Map.of(),
-                        "message", "분석 데이터가 아직 생성되지 않았습니다."
-                    ));
+                    log.info("[분석] 분석 데이터 없음 — 자동 생성 시작: {}", jp.getCompanyName());
+                    try {
+                        List<EssayQuestion> questions = deserializeEssayQuestions(jp.getEssayQuestionsJson());
+                        analysis = companyAnalyzer.analyze(jp, questions);
+                        if (analysis != null) {
+                            jp.updateCompanyAnalysis(analysis);
+                            jobPostingRepository.save(jp);
+                            log.info("[분석] 자동 생성 완료: {}", jp.getCompanyName());
+                        } else {
+                            return ResponseEntity.ok(Map.of(
+                                "jobPostingId", jobPostingId,
+                                "companyName", jp.getCompanyName() != null ? jp.getCompanyName() : "",
+                                "analysis", Map.of(),
+                                "message", "분석 생성에 실패했습니다. AI 응답에서 유효한 JSON을 추출할 수 없습니다."
+                            ));
+                        }
+                    } catch (Exception e) {
+                        log.error("[분석] 자동 분석 생성 실패: {}", e.getMessage(), e);
+                        return ResponseEntity.ok(Map.of(
+                            "jobPostingId", jobPostingId,
+                            "companyName", jp.getCompanyName() != null ? jp.getCompanyName() : "",
+                            "analysis", Map.of(),
+                            "message", "분석 생성 중 오류: " + e.getMessage()
+                        ));
+                    }
                 }
+
                 try {
-                    var analysisNode = objectMapper.readTree(analysis);
+                    var analysisNode = LENIENT_MAPPER.readTree(analysis);
                     return ResponseEntity.ok(Map.of(
                         "jobPostingId", jobPostingId,
                         "companyName", jp.getCompanyName() != null ? jp.getCompanyName() : "",
                         "analysis", analysisNode
                     ));
                 } catch (Exception e) {
+                    // JSON 파싱 불가해도 원본 텍스트 반환
                     return ResponseEntity.ok(Map.of(
                         "jobPostingId", jobPostingId,
                         "companyName", jp.getCompanyName() != null ? jp.getCompanyName() : "",
@@ -192,6 +228,16 @@ public class CoverLetterController {
                 }
             })
             .orElse(ResponseEntity.notFound().build());
+    }
+
+    private List<EssayQuestion> deserializeEssayQuestions(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            return objectMapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<List<EssayQuestion>>() {});
+        } catch (Exception e) {
+            log.warn("자소서 문항 역직렬화 실패: {}", e.getMessage());
+            return List.of();
+        }
     }
 
     @Operation(summary = "전체 자소서 목록", description = "회사별로 그룹핑된 전체 자소서 목록을 조회합니다")

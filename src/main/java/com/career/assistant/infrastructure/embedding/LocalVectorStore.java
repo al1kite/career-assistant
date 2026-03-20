@@ -89,11 +89,21 @@ public class LocalVectorStore {
      * @return ID 리스트 (유사도 내림차순)
      */
     public List<Long> search(float[] queryVector, int topK) {
+        return search(queryVector, topK, Set.of());
+    }
+
+    /**
+     * 코사인 유사도 기반 top-K 검색 (특정 ID 제외).
+     * @param excludeIds 검색에서 제외할 ID 집합
+     * @return ID 리스트 (유사도 내림차순)
+     */
+    public List<Long> search(float[] queryVector, int topK, Set<Long> excludeIds) {
         if (vectors.isEmpty()) {
             return List.of();
         }
 
         return vectors.entrySet().stream()
+            .filter(e -> !excludeIds.contains(e.getKey()))
             .map(e -> Map.entry(e.getKey(), cosineSimilarity(queryVector, e.getValue())))
             .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
             .limit(topK)
