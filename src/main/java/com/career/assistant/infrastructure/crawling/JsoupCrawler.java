@@ -318,10 +318,13 @@ public class JsoupCrawler {
                 // __NEXT_DATA__에서 자소서 문항 추출 시도
                 essayQuestions = extractEssayQuestionsFromJson(pageProps);
 
-                // 문항 텍스트가 없으면, 인증 API로 실제 문항 텍스트 추출 시도
-                if (essayQuestions.isEmpty()) {
+                // 인증 API로 문항 + 직무 설명 보강 (문항이 없거나, 직무 설명이 빈약할 때)
+                if (essayQuestions.isEmpty() || jobDescription.length() < 100) {
                     StringBuilder authExtraInfo = new StringBuilder();
-                    essayQuestions = extractQuestionsWithAuth(pageProps, authExtraInfo);
+                    List<EssayQuestion> authQuestions = extractQuestionsWithAuth(pageProps, authExtraInfo);
+                    if (essayQuestions.isEmpty() && !authQuestions.isEmpty()) {
+                        essayQuestions = authQuestions;
+                    }
                     if (!authExtraInfo.isEmpty()) {
                         jobDescription = jobDescription.isBlank()
                             ? authExtraInfo.toString()

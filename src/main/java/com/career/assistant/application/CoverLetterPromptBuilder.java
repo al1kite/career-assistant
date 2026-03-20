@@ -98,6 +98,16 @@ public class CoverLetterPromptBuilder {
             - 기술 나열이 아니라 '왜 그 기술을 선택했는가'의 판단 과정을 보여주세요.
             - 인사팀은 '이 사람과 함께 일하고 싶은가?'를 봅니다.
 
+            [평가 기준 — 8가지 모두 충족하세요]
+            1. 입사지원분야 경쟁력 → 자격요건과 경험을 직접 연결
+            2. 회사 분석 → 기업분석 고유명사 2개 이상 포함
+            3. 진부한 표현 없음 → [금지 표현] 준수
+            4. 구체적 경험 → 숫자, 프로젝트명, KPI 필수
+            5. 필요항목 빠짐없이 → 문항 하위 질문 모두 답변
+            6. 간결하고 명료 → 불필요한 수식어 삭제
+            7. 맞춤법/띄어쓰기 → 최종 점검
+            8. 열정 → 이 회사가 아니면 안 되는 절실함
+
             [키워드 전략]
             - 행동동사 중심: "설계했습니다", "주도했습니다", "구축했습니다"
             - 수동적 표현 금지: "~하게 되었습니다", "~할 수 있었습니다", "~에 참여했습니다"
@@ -135,7 +145,7 @@ public class CoverLetterPromptBuilder {
                 EXPERIENCE_GROUNDING_RULES,
                 tone,
                 jobPosting.getCompanyName(),
-                jobPosting.getJobDescription(),
+                getEffectiveJobDescription(jobPosting),
                 jobPosting.getRequirements(),
                 experienceSummary
             );
@@ -152,6 +162,12 @@ public class CoverLetterPromptBuilder {
 
     public String buildForQuestion(JobPosting jobPosting, UserExperience primary,
                                     List<UserExperience> secondary, EssayQuestion question) {
+        return buildForQuestion(jobPosting, primary, secondary, question, null);
+    }
+
+    public String buildForQuestion(JobPosting jobPosting, UserExperience primary,
+                                    List<UserExperience> secondary, EssayQuestion question,
+                                    String masterPlan) {
         String experienceSummary = formatQuestionExperiences(primary, secondary);
 
         String tone = resolveTone(jobPosting.getCompanyType());
@@ -159,6 +175,7 @@ public class CoverLetterPromptBuilder {
         String typeGuide = getTypeGuide(questionType);
         String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
         String questionGuide = buildQuestionGuide(jobPosting, question);
+        String masterPlanSection = buildMasterPlanSection(masterPlan, question.number());
         int charLimit = question.charLimit() > 0 ? question.charLimit() : 1000;
         int targetMin = (int) (charLimit * 0.9);
 
@@ -186,7 +203,7 @@ public class CoverLetterPromptBuilder {
 
             [기업 분석 — 반드시 답변에 반영할 것]
             %s
-
+            %s
             [이 문항 전용 작성 가이드]
             %s
 
@@ -211,6 +228,16 @@ public class CoverLetterPromptBuilder {
             - 성장가능성: 장기적으로 이 회사에서 성장하고 싶은 진정성이 있는가?
             - 기술 나열이 아니라 '왜 그 기술을 선택했는가'의 판단 과정을 보여주세요.
             - 인사팀은 '이 사람과 함께 일하고 싶은가?'를 봅니다.
+
+            [평가 기준 — 8가지 모두 충족하세요]
+            1. 입사지원분야 경쟁력 → 자격요건과 경험을 직접 연결
+            2. 회사 분석 → 기업분석 고유명사 2개 이상 포함
+            3. 진부한 표현 없음 → [금지 표현] 준수
+            4. 구체적 경험 → 숫자, 프로젝트명, KPI 필수
+            5. 필요항목 빠짐없이 → 문항 하위 질문 모두 답변
+            6. 간결하고 명료 → 불필요한 수식어 삭제
+            7. 맞춤법/띄어쓰기 → 최종 점검
+            8. 열정 → 이 회사가 아니면 안 되는 절실함
 
             [키워드 전략]
             - 행동동사 중심: "설계했습니다", "주도했습니다", "구축했습니다"
@@ -247,13 +274,14 @@ public class CoverLetterPromptBuilder {
                 question.number(),
                 question.questionText(),
                 companyAnalysis,
+                masterPlanSection,
                 questionGuide.isBlank() ? "(분석 데이터 없음 — 채용공고에서 직접 파악하세요)" : questionGuide,
                 questionType,
                 typeGuide,
                 EXPERIENCE_GROUNDING_RULES,
                 tone,
                 jobPosting.getCompanyName(),
-                jobPosting.getJobDescription(),
+                getEffectiveJobDescription(jobPosting),
                 jobPosting.getRequirements(),
                 experienceSummary
             );
@@ -372,7 +400,7 @@ public class CoverLetterPromptBuilder {
                 companyAnalysis,
                 tone,
                 jobPosting.getCompanyName(),
-                jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "",
+                getEffectiveJobDescription(jobPosting),
                 jobPosting.getRequirements() != null ? jobPosting.getRequirements() : "",
                 EXPERIENCE_GROUNDING_RULES,
                 experienceSummary
@@ -434,6 +462,83 @@ public class CoverLetterPromptBuilder {
         }
 
         return guide.toString();
+    }
+
+    private String buildMasterPlanSection(String masterPlanJson, int questionNumber) {
+        if (masterPlanJson == null || masterPlanJson.isBlank()) return "";
+
+        try {
+            JsonNode plan = objectMapper.readTree(masterPlanJson);
+            StringBuilder sb = new StringBuilder();
+            sb.append("\n[전체 자소서 전략 — 반드시 따를 것]\n");
+
+            // 서사 테마
+            String theme = plan.path("narrativeTheme").asText("");
+            if (!theme.isBlank()) {
+                sb.append("서사 테마: ").append(theme).append("\n");
+            }
+
+            // 어필 포인트
+            JsonNode appealPoints = plan.path("appealPoints");
+            if (appealPoints.isArray() && !appealPoints.isEmpty()) {
+                sb.append("어필 포인트: ");
+                for (int i = 0; i < appealPoints.size(); i++) {
+                    if (i > 0) sb.append(" / ");
+                    sb.append(appealPoints.get(i).asText());
+                }
+                sb.append("\n");
+            }
+
+            // 직무 분석
+            JsonNode jobAnalysis = plan.path("jobAnalysis");
+            if (!jobAnalysis.isMissingNode()) {
+                String jobEssence = jobAnalysis.path("jobEssence").asText("");
+                if (!jobEssence.isBlank()) {
+                    sb.append("직무 본질: ").append(jobEssence).append("\n");
+                }
+                String hidden = jobAnalysis.path("hiddenExpectations").asText("");
+                if (!hidden.isBlank()) {
+                    sb.append("숨은 기대: ").append(hidden).append("\n");
+                }
+            }
+
+            // 회피 사항
+            JsonNode avoidances = plan.path("avoidances");
+            if (avoidances.isArray() && !avoidances.isEmpty()) {
+                sb.append("전체 회피사항: ");
+                for (int i = 0; i < avoidances.size(); i++) {
+                    if (i > 0) sb.append(" / ");
+                    sb.append(avoidances.get(i).asText());
+                }
+                sb.append("\n");
+            }
+
+            // 이 문항의 전략
+            JsonNode strategies = plan.path("questionStrategies");
+            if (strategies.isArray()) {
+                for (JsonNode qs : strategies) {
+                    if (qs.path("questionIndex").asInt(0) == questionNumber) {
+                        sb.append("\n[이 문항(").append(questionNumber).append("번)의 전략]\n");
+                        String role = qs.path("roleInNarrative").asText("");
+                        if (!role.isBlank()) sb.append("서사 내 역할: ").append(role).append("\n");
+                        String angle = qs.path("primaryAngle").asText("");
+                        if (!angle.isBlank()) sb.append("경험 서술 각도: ").append(angle).append("\n");
+                        String keyMsg = qs.path("keyMessage").asText("");
+                        if (!keyMsg.isBlank()) sb.append("핵심 메시지: ").append(keyMsg).append("\n");
+                        String connection = qs.path("connectionToNext").asText("");
+                        if (!connection.isBlank()) sb.append("다음 문항 연결: ").append(connection).append("\n");
+                        break;
+                    }
+                }
+            }
+
+            sb.append("\n");
+            return sb.toString();
+
+        } catch (Exception e) {
+            log.debug("masterPlan 파싱 실패: {}", e.getMessage());
+            return "";
+        }
     }
 
     /**
@@ -740,6 +845,19 @@ public class CoverLetterPromptBuilder {
             sb.append("\n기술스택: ").append(e.getSkills());
         }
         return sb.toString();
+    }
+
+    private String getEffectiveJobDescription(JobPosting jobPosting) {
+        String jd = jobPosting.getJobDescription();
+        if (jd == null || jd.length() < 100) {
+            return (jd != null ? jd : "(정보 없음)")
+                + "\n\n⚠ 위 직무 설명이 매우 제한적입니다. "
+                + "반드시 아래 [지원자 경험]의 기술스택·업무내용을 분석하여 "
+                + "지원자의 실제 직무 분야(백엔드/프론트엔드/풀스택/데이터 등)를 파악하고, "
+                + "그 분야에 맞는 자소서를 작성하세요. "
+                + "예: 경험이 Spring Boot·JPA·QueryDSL 중심이면 '백엔드 개발자'로 판단하여 백엔드 직무에 맞게 작성.";
+        }
+        return jd;
     }
 
     private String resolveTone(CompanyType companyType) {
