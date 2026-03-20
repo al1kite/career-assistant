@@ -47,6 +47,7 @@ public class CoverLetterFacade {
     private final CompanyClassifier companyClassifier;
     private final CompanyAnalyzer companyAnalyzer;
     private final CoverLetterPromptBuilder promptBuilder;
+    private final CoverLetterStrategyPlanner strategyPlanner;
     private final AiRouter aiRouter;
     private final ObjectMapper objectMapper;
     private final ReviewAgent reviewAgent;
@@ -276,6 +277,15 @@ public class CoverLetterFacade {
             return List.of(finalLetter);
         }
 
+        // 전략 수립 (문항 2개 이상일 때)
+        String masterPlan = null;
+        try {
+            List<UserExperience> allExperiences = userExperienceRepository.findAll();
+            masterPlan = strategyPlanner.planStrategy(jobPosting, essayQuestions, allExperiences);
+        } catch (Exception e) {
+            log.warn("[전략] 전략 수립 중 오류 — 개별 생성 방식으로 진행: {}", e.getMessage());
+        }
+
         List<CoverLetter> finalLetters = new ArrayList<>();
         Set<Long> usedPrimaryIds = new LinkedHashSet<>();
         for (EssayQuestion question : essayQuestions) {
@@ -291,7 +301,7 @@ public class CoverLetterFacade {
             log.info("[RAG] 문항 {} 검색된 경험 {}건, 주력 경험 ID: {}",
                 question.number(), experiences.size(), primary != null ? primary.getId() : "없음");
 
-            String prompt = promptBuilder.buildForQuestion(jobPosting, primary, secondary, question);
+            String prompt = promptBuilder.buildForQuestion(jobPosting, primary, secondary, question, masterPlan);
             int charLimit = question.charLimit() > 0 ? question.charLimit() : 1000;
             String content = enforceCharLimit(ai.generate(prompt), charLimit);
 
@@ -450,15 +460,15 @@ public class CoverLetterFacade {
 
     String getFixAdvice(String field, int score) {
         return switch (field) {
-            case "answerRelevance" -> "첫 문장부터 질문 키워드에 직접 응답하세요. 질문이 묻는 것에 정면으로 답하세요.";
-            case "jobFit" -> "채용공고 자격요건의 기술 키워드를 본인 경험과 직접 연결하세요. 구체적 프로젝트와 성과를 매칭하세요.";
-            case "orgFit" -> "회사 분석의 핵심 가치/문화를 구체적으로 언급하세요. 이 회사만의 특성이 드러나야 합니다.";
-            case "specificity" -> "'많은 개선'→'응답시간 2.3초→0.4초'로 교체하세요. 숫자, 프로젝트명, KPI를 반드시 포함하세요.";
-            case "authenticity" -> "이 지원자만 쓸 수 있는 구체적 장면을 추가하세요. 날짜, 시간, 감정, 오감 디테일을 녹이세요.";
-            case "aiDetectionRisk" -> "어미 반복을 깨고, 구어체 전환어('솔직히', '돌이켜보면')를 추가하고, 감정 표현을 넣으세요.";
-            case "logicalStructure" -> "기승전결 순서를 점검하세요. 단락 간 논리 연결이 자연스러운지 확인하고, 비약이 있으면 연결 문장을 추가하세요.";
-            case "keywordUsage" -> "채용공고의 핵심 키워드 3~5개를 추출하여 문맥에 맞게 자연스럽게 포함하세요.";
-            case "experienceConsistency" -> "제공된 경험 목록에 없는 프로젝트나 경력을 삭제하세요. 실제 경험만 정확히 인용하세요.";
+            case "answerRelevance" -> "[기준5] 첫 문장부터 질문 키워드에 직접 응답하세요. 질문이 묻는 것에 정면으로 답하고, 문항 하위 질문을 빠짐없이 다루세요.";
+            case "jobFit" -> "[기준1] 채용공고 자격요건의 기술 키워드를 본인 경험과 직접 연결하세요. 구체적 프로젝트와 성과를 매칭하세요.";
+            case "orgFit" -> "[기준2,8] 회사 분석의 핵심 가치/문화를 구체적으로 언급하세요. 기업 고유명사 2개 이상 필수. 이 회사가 아니면 안 되는 절실함을 보여주세요.";
+            case "specificity" -> "[기준4] '많은 개선'→'응답시간 2.3초→0.4초'로 교체하세요. 숫자, 프로젝트명, KPI를 반드시 포함하세요.";
+            case "authenticity" -> "[기준3,8] 이 지원자만 쓸 수 있는 구체적 장면을 추가하세요. 진부한 표현을 제거하고, 날짜/시간/감정 등 생생한 디테일을 녹이세요.";
+            case "aiDetectionRisk" -> "[기준3] 어미 반복을 깨고, 구어체 전환어('솔직히', '돌이켜보면')를 추가하고, 감정 표현을 넣으세요.";
+            case "logicalStructure" -> "[기준6] 기승전결 순서를 점검하세요. 불필요한 수식어를 삭제하고, 단락 간 논리 연결이 자연스러운지 확인하세요.";
+            case "keywordUsage" -> "[기준1] 채용공고의 핵심 키워드 3~5개를 추출하여 문맥에 맞게 자연스럽게 포함하세요.";
+            case "experienceConsistency" -> "[기준4] 제공된 경험 목록에 없는 프로젝트나 경력을 삭제하세요. 실제 경험만 정확히 인용하세요.";
             default -> "해당 항목의 점수를 높이기 위해 구체성과 관련성을 강화하세요.";
         };
     }

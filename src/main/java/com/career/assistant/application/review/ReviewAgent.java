@@ -66,9 +66,22 @@ public class ReviewAgent {
         8. 키워드 활용 (가중치 10%): 채용공고의 핵심 키워드가 자연스럽게 녹아있는가?
         9. 경험 일관성 (가중치 5%): 자소서에 언급된 경험이 [제공된 경험 목록]과 일치하는가? 제공되지 않은 프로젝트, 회사, 수상 경력이 언급되면 0점.
 
+        [8대 평가 기준 ↔ 9개 세부 점수 매핑]
+        아래 8대 평가 기준을 반드시 점검하고, 해당 세부 점수에 반영하세요:
+        1. 입사지원분야 경쟁력 → jobFit, keywordUsage
+        2. 회사 분석 → orgFit (고유명사 2개 이상 필수)
+        3. 진부한 표현 없음 → authenticity, aiDetectionRisk
+        4. 구체적 경험 → specificity, experienceConsistency
+        5. 필요항목 빠짐없이 → answerRelevance
+        6. 간결하고 명료 → logicalStructure
+        7. 맞춤법/띄어쓰기 → violations에 지적
+        8. 열정 → orgFit, authenticity
+
         [피드백 규칙]
         - violations: 반드시 문장을 인용하고 구체적 문제를 지적하세요. "좀 더 구체적으로" 같은 모호한 피드백 금지.
         - improvements: 현재 문장을 인용 → 문제점 → 개선 방향 → 개선 예시를 포함하세요.
+        - overallComment에서 8대 평가 기준 중 부족한 항목을 번호와 함께 명시적으로 언급하세요.
+          예: "기준 2(회사 분석) — 고유명사가 1개뿐입니다. 기준 4(구체적 경험) — 정량적 수치가 부족합니다."
 
         [출력 형식]
         반드시 아래 JSON 형식만 출력하세요. 다른 텍스트, 설명, 마크다운 절대 금지.
@@ -86,7 +99,7 @@ public class ReviewAgent {
           },
           "violations": ["문장 인용 + 구체적 문제 지적", ...],
           "improvements": ["현재 문장 인용 → 개선 방향 → 예시", ...],
-          "overallComment": "전체 총평 (2~3문장)"
+          "overallComment": "전체 총평 (2~3문장). 8대 평가 기준 중 부족한 항목을 번호와 함께 명시."
         }""";
 
     private final AiPort claudeHaiku;
