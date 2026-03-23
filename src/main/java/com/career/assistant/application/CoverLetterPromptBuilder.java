@@ -9,7 +9,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -38,6 +40,7 @@ public class CoverLetterPromptBuilder {
 
         String tone = resolveTone(jobPosting.getCompanyType());
         String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
+        String jobRoleDirective = buildJobRoleDirective(jobPosting, experiences);
         int targetMin = (int) (charLimit * 0.9);
 
         return """
@@ -50,7 +53,7 @@ public class CoverLetterPromptBuilder {
             반드시 %d자 이내로 작성하세요. (공백 포함, 초과 시 탈락)
             목표 범위: %d자 ~ %d자.
             인사팀(비개발자)이 읽는다는 점을 항상 기억하세요.
-
+            %s
             [기술 블로그 스타일 금지 — 위반 시 탈락]
             이 글의 독자는 인사팀입니다. 개발자가 아닙니다.
             - 기술 용어 3개 이상을 맥락 없이 나열하면 탈락입니다.
@@ -141,11 +144,12 @@ public class CoverLetterPromptBuilder {
                 charLimit,
                 targetMin,
                 charLimit,
+                jobRoleDirective,
                 companyAnalysis,
                 EXPERIENCE_GROUNDING_RULES,
                 tone,
                 jobPosting.getCompanyName(),
-                getEffectiveJobDescription(jobPosting),
+                jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "(정보 없음)",
                 jobPosting.getRequirements(),
                 experienceSummary
             );
@@ -170,12 +174,17 @@ public class CoverLetterPromptBuilder {
                                     String masterPlan) {
         String experienceSummary = formatQuestionExperiences(primary, secondary);
 
+        List<UserExperience> allExperiences = new java.util.ArrayList<>();
+        if (primary != null) allExperiences.add(primary);
+        if (secondary != null) allExperiences.addAll(secondary);
+
         String tone = resolveTone(jobPosting.getCompanyType());
         String questionType = classifyQuestionType(question.questionText());
         String typeGuide = getTypeGuide(questionType);
         String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
         String questionGuide = buildQuestionGuide(jobPosting, question);
         String masterPlanSection = buildMasterPlanSection(masterPlan, question.number());
+        String jobRoleDirective = buildJobRoleDirective(jobPosting, allExperiences);
         int charLimit = question.charLimit() > 0 ? question.charLimit() : 1000;
         int targetMin = (int) (charLimit * 0.9);
 
@@ -189,7 +198,7 @@ public class CoverLetterPromptBuilder {
             반드시 %d자 이내로 작성하세요. (공백 포함, 초과 시 탈락)
             목표 범위: %d자 ~ %d자.
             인사팀(비개발자)이 읽는다는 점을 항상 기억하세요.
-
+            %s
             [기술 블로그 스타일 금지 — 위반 시 탈락]
             이 글의 독자는 인사팀입니다. 개발자가 아닙니다.
             - 기술 용어 3개 이상을 맥락 없이 나열하면 탈락입니다.
@@ -271,6 +280,7 @@ public class CoverLetterPromptBuilder {
                 charLimit,
                 targetMin,
                 charLimit,
+                jobRoleDirective,
                 question.number(),
                 question.questionText(),
                 companyAnalysis,
@@ -281,7 +291,7 @@ public class CoverLetterPromptBuilder {
                 EXPERIENCE_GROUNDING_RULES,
                 tone,
                 jobPosting.getCompanyName(),
-                getEffectiveJobDescription(jobPosting),
+                jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "(정보 없음)",
                 jobPosting.getRequirements(),
                 experienceSummary
             );
@@ -324,8 +334,13 @@ public class CoverLetterPromptBuilder {
                                            String userMessage) {
         String experienceSummary = formatQuestionExperiences(primary, secondary);
 
+        List<UserExperience> allExperiences = new java.util.ArrayList<>();
+        if (primary != null) allExperiences.add(primary);
+        if (secondary != null) allExperiences.addAll(secondary);
+
         String tone = resolveTone(jobPosting.getCompanyType());
         String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
+        String jobRoleDirective = buildJobRoleDirective(jobPosting, allExperiences);
 
         String userMessageSection = "";
         if (userMessage != null && !userMessage.isBlank()) {
@@ -365,7 +380,7 @@ public class CoverLetterPromptBuilder {
             반드시 %d자 이내로 작성하세요. (공백 포함, 초과 절대 금지)
             %s
             %s
-
+            %s
             [검토 피드백 (채용팀장)]
             %s
 
@@ -394,13 +409,14 @@ public class CoverLetterPromptBuilder {
                 charLimit,
                 userMessageSection,
                 improvementSection,
+                jobRoleDirective,
                 reviewFeedbackJson,
                 previousDraft,
                 question != null ? question : "(단일 자소서)",
                 companyAnalysis,
                 tone,
                 jobPosting.getCompanyName(),
-                getEffectiveJobDescription(jobPosting),
+                jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "(정보 없음)",
                 jobPosting.getRequirements() != null ? jobPosting.getRequirements() : "",
                 EXPERIENCE_GROUNDING_RULES,
                 experienceSummary
@@ -847,17 +863,74 @@ public class CoverLetterPromptBuilder {
         return sb.toString();
     }
 
-    private String getEffectiveJobDescription(JobPosting jobPosting) {
+    /**
+     * 직무 설명이 빈약할 때, 지원자 경험에서 기술스택을 추출하여 직무 정합성 지시문을 생성합니다.
+     * 프롬프트 상단([최우선 규칙] 바로 뒤)에 삽입되어 AI가 올바른 직무로 작성하도록 강제합니다.
+     */
+    private String buildJobRoleDirective(JobPosting jobPosting, List<UserExperience> experiences) {
         String jd = jobPosting.getJobDescription();
-        if (jd == null || jd.length() < 100) {
-            return (jd != null ? jd : "(정보 없음)")
-                + "\n\n⚠ 위 직무 설명이 매우 제한적입니다. "
-                + "반드시 아래 [지원자 경험]의 기술스택·업무내용을 분석하여 "
-                + "지원자의 실제 직무 분야(백엔드/프론트엔드/풀스택/데이터 등)를 파악하고, "
-                + "그 분야에 맞는 자소서를 작성하세요. "
-                + "예: 경험이 Spring Boot·JPA·QueryDSL 중심이면 '백엔드 개발자'로 판단하여 백엔드 직무에 맞게 작성.";
+        if (jd != null && jd.length() >= 100) return "";
+        if (experiences == null || experiences.isEmpty()) return "";
+
+        Set<String> skills = new LinkedHashSet<>();
+        for (UserExperience exp : experiences) {
+            if (exp.getSkills() != null && !exp.getSkills().isBlank()) {
+                for (String skill : exp.getSkills().split("[,/·]+")) {
+                    String trimmed = skill.trim();
+                    if (!trimmed.isBlank() && trimmed.length() >= 2) {
+                        skills.add(trimmed);
+                    }
+                }
+            }
         }
-        return jd;
+        if (skills.isEmpty()) return "";
+
+        String skillList = skills.stream().limit(12).collect(Collectors.joining(", "));
+        String inferredRole = inferRole(skills);
+
+        return """
+
+            [직무 정합성 — 위반 시 즉시 탈락]
+            채용공고의 직무 설명이 매우 제한적입니다.
+            지원자 보유 기술: %s
+            추정 직무 분야: %s
+            반드시 위 기술스택과 직무 분야에 맞는 자소서를 작성하세요.
+            지원자 경험과 무관한 직무(예: %s)로 작성하면 즉시 탈락입니다.
+            """.formatted(skillList, inferredRole, getIrrelevantRoles(inferredRole));
+    }
+
+    private String inferRole(Set<String> skills) {
+        String combined = String.join(" ", skills).toLowerCase();
+
+        int backend = countMatches(combined, "spring", "jpa", "querydsl", "mybatis",
+            "hibernate", "jdbc", "java", "kotlin", "서버", "backend", "백엔드",
+            "mysql", "postgresql", "redis", "kafka", "rest", "api", "msa", "jdk");
+        int frontend = countMatches(combined, "react", "vue", "angular", "javascript",
+            "typescript", "프론트", "frontend", "css", "html", "next", "nuxt", "svelte");
+        int data = countMatches(combined, "python", "데이터", "머신러닝", "ml",
+            "tensorflow", "pytorch", "pandas", "spark", "airflow");
+
+        if (backend >= frontend && backend >= data) return "백엔드 개발";
+        if (frontend > backend && frontend >= data) return "프론트엔드 개발";
+        if (data > backend && data > frontend) return "데이터/ML 엔지니어링";
+        return "소프트웨어 개발";
+    }
+
+    private int countMatches(String text, String... keywords) {
+        int count = 0;
+        for (String kw : keywords) {
+            if (text.contains(kw)) count++;
+        }
+        return count;
+    }
+
+    private String getIrrelevantRoles(String inferredRole) {
+        return switch (inferredRole) {
+            case "백엔드 개발" -> "프론트엔드, 디자인, 기획, 데이터분석";
+            case "프론트엔드 개발" -> "백엔드, 인프라, 데이터분석, 기획";
+            case "데이터/ML 엔지니어링" -> "프론트엔드, 디자인, 기획";
+            default -> "지원자 기술스택과 무관한 분야";
+        };
     }
 
     private String resolveTone(CompanyType companyType) {
