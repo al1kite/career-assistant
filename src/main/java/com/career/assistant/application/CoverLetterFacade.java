@@ -35,8 +35,8 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class CoverLetterFacade {
 
-    private static final int MAX_ITERATIONS = 3;
-    private static final int MIN_ITERATIONS = 2;
+    private static final int MAX_ITERATIONS = 2;
+    private static final int MIN_ITERATIONS = 1;
     private static final String QUALITY_GRADE = "A";
 
     private final JobPostingRepository jobPostingRepository;

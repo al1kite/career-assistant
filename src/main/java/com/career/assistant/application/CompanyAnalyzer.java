@@ -34,7 +34,7 @@ public class CompanyAnalyzer {
         - "금융 IT 서비스", "솔루션 기업" 같은 포괄적 표현 금지. "exture+(초저지연 주문 처리 시스템)" 수준의 구체성 필요.
         - 각 필드를 충분히 상세하게 작성하세요. 피상적 분석은 가치가 없습니다.""";
 
-    private final AiPort claudeSonnet;
+    private final AiPort claudeHaiku;
     private final DartClient dartClient;
     private final DartCorpCodeCache dartCorpCodeCache;
 
@@ -46,10 +46,10 @@ public class CompanyAnalyzer {
         .enable(JsonReadFeature.ALLOW_LEADING_ZEROS_FOR_NUMBERS)
         .build();
 
-    public CompanyAnalyzer(@Qualifier("claudeSonnet") AiPort claudeSonnet,
+    public CompanyAnalyzer(@Qualifier("claudeHaiku") AiPort claudeHaiku,
                            DartClient dartClient,
                            DartCorpCodeCache dartCorpCodeCache) {
-        this.claudeSonnet = claudeSonnet;
+        this.claudeHaiku = claudeHaiku;
         this.dartClient = dartClient;
         this.dartCorpCodeCache = dartCorpCodeCache;
     }
@@ -79,7 +79,7 @@ public class CompanyAnalyzer {
         log.info("[분석] AI 분석 요청 - {} (프롬프트 {}자, DART: {})",
             jobPosting.getCompanyName(), userPrompt.length(), dartData.hasData() ? "활용" : "없음");
 
-        String response = claudeSonnet.generate(SYSTEM_PROMPT, userPrompt);
+        String response = claudeHaiku.generate(SYSTEM_PROMPT, userPrompt);
         if (response == null || response.isBlank()) {
             log.error("[분석] AI 응답이 비어있습니다.");
             return null;

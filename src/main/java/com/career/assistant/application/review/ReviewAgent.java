@@ -123,8 +123,8 @@ public class ReviewAgent {
                                int iterationNum, List<UserExperience> providedExperiences,
                                int charLimit) {
         String userPrompt = buildReviewPrompt(draft, jobPosting, question, iterationNum, providedExperiences, charLimit);
-        // 리뷰도 항상 Sonnet — 정확한 피드백이 개선 품질을 결정
-        AiPort reviewer = claudeSonnet;
+        // 1차 리뷰는 Sonnet (개선 방향 결정), 2차+ Haiku (확인 점검)
+        AiPort reviewer = (iterationNum == 1) ? claudeSonnet : claudeHaiku;
 
         try {
             log.info("[에이전트] {}차 검토 — 모델: {}", iterationNum, reviewer.getModelName());

@@ -21,10 +21,10 @@ public class CoverLetterStrategyPlanner {
         전체 자소서의 통합 전략을 JSON으로 수립합니다.
         반드시 순수 JSON만 출력하세요. 마크다운 코드블록(```) 없이.""";
 
-    private final AiPort claudeSonnet;
+    private final AiPort claudeHaiku;
 
-    public CoverLetterStrategyPlanner(@Qualifier("claudeSonnet") AiPort claudeSonnet) {
-        this.claudeSonnet = claudeSonnet;
+    public CoverLetterStrategyPlanner(@Qualifier("claudeHaiku") AiPort claudeHaiku) {
+        this.claudeHaiku = claudeHaiku;
     }
 
     public String planStrategy(JobPosting jobPosting, List<EssayQuestion> questions,
@@ -36,7 +36,7 @@ public class CoverLetterStrategyPlanner {
 
         try {
             String userPrompt = buildStrategyPrompt(jobPosting, questions, allExperiences);
-            String response = claudeSonnet.generate(SYSTEM_PROMPT, userPrompt);
+            String response = claudeHaiku.generate(SYSTEM_PROMPT, userPrompt);
 
             String json = extractJson(response);
             if (json != null) {
