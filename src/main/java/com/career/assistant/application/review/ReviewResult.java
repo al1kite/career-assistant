@@ -31,13 +31,13 @@ public record ReviewResult(
         return (int) Math.round(
             s.answerRelevance * 0.10
             + s.jobFit * 0.20
-            + s.orgFit * 0.15
+            + s.orgFit * 0.20
             + s.specificity * 0.15
             + s.authenticity * 0.10
             + (100 - s.aiDetectionRisk) * 0.10
-            + s.logicalStructure * 0.05
+            + s.logicalStructure * 0.03
             + s.keywordUsage * 0.10
-            + s.experienceConsistency * 0.05
+            + s.experienceConsistency * 0.02
         );
     }
 
