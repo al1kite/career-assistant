@@ -55,10 +55,13 @@ public class CompanyAnalyzer {
     }
 
     public String analyze(JobPosting jobPosting, List<EssayQuestion> questions) {
+        String companyName = jobPosting.getCompanyName();
+        DartCompanyData dartData = fetchDartData(companyName);
+
         // 1차: DART 포함 시도
-        DartCompanyData dartData = fetchDartData(jobPosting.getCompanyName());
         try {
-            return doAnalyze(jobPosting, questions, dartData);
+            String prompt = buildAnalysisPrompt(jobPosting, questions, dartData);
+            return callAiAndParse(prompt, companyName, dartData.hasData());
         } catch (Exception e) {
             log.warn("[분석] 1차 시도 실패 (DART: {}) — DART 없이 재시도: {}",
                 dartData.hasData(), e.getMessage());
@@ -66,18 +69,39 @@ public class CompanyAnalyzer {
 
         // 2차: DART 없이 재시도
         try {
-            return doAnalyze(jobPosting, questions, new DartCompanyData(null, null));
+            String prompt = buildAnalysisPrompt(jobPosting, questions, new DartCompanyData(null, null));
+            return callAiAndParse(prompt, companyName, false);
         } catch (Exception e) {
             log.error("[분석] 2차 시도도 실패: {}", e.getMessage());
             return null;
         }
     }
 
-    private String doAnalyze(JobPosting jobPosting, List<EssayQuestion> questions,
-                              DartCompanyData dartData) {
-        String userPrompt = buildAnalysisPrompt(jobPosting, questions, dartData);
+    public String analyzeByName(String companyName) {
+        DartCompanyData dartData = fetchDartData(companyName);
+
+        // 1차: DART 포함 시도
+        try {
+            String prompt = buildCompanyOnlyPrompt(companyName, dartData);
+            return callAiAndParse(prompt, companyName, dartData.hasData());
+        } catch (Exception e) {
+            log.warn("[분석] 회사명 단독 분석 1차 실패 (DART: {}) — 재시도: {}",
+                dartData.hasData(), e.getMessage());
+        }
+
+        // 2차: DART 없이 재시도
+        try {
+            String prompt = buildCompanyOnlyPrompt(companyName, new DartCompanyData(null, null));
+            return callAiAndParse(prompt, companyName, false);
+        } catch (Exception e) {
+            log.error("[분석] 회사명 단독 분석 2차도 실패: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private String callAiAndParse(String userPrompt, String companyName, boolean hasDart) {
         log.info("[분석] AI 분석 요청 - {} (프롬프트 {}자, DART: {})",
-            jobPosting.getCompanyName(), userPrompt.length(), dartData.hasData() ? "활용" : "없음");
+            companyName, userPrompt.length(), hasDart ? "활용" : "없음");
 
         String response = claudeHaiku.generate(SYSTEM_PROMPT, userPrompt);
         if (response == null || response.isBlank()) {
@@ -98,7 +122,7 @@ public class CompanyAnalyzer {
             var tree = LENIENT_MAPPER.readTree(rawJson);
             String normalized = LENIENT_MAPPER.writeValueAsString(tree);
             log.info("[분석] 회사 분석 완료 - {} ({}자, DART: {})",
-                jobPosting.getCompanyName(), normalized.length(), dartData.hasData() ? "활용" : "없음");
+                companyName, normalized.length(), hasDart ? "활용" : "없음");
             return normalized;
         } catch (Exception e) {
             log.warn("[분석] 1차 JSON 파싱 실패: {}", e.getMessage());
@@ -109,7 +133,7 @@ public class CompanyAnalyzer {
             String cleaned = escapeControlCharsInStrings(rawJson);
             var tree = LENIENT_MAPPER.readTree(cleaned);
             String normalized = LENIENT_MAPPER.writeValueAsString(tree);
-            log.info("[분석] 회사 분석 완료 (정리 후) - {} ({}자)", jobPosting.getCompanyName(), normalized.length());
+            log.info("[분석] 회사 분석 완료 (정리 후) - {} ({}자)", companyName, normalized.length());
             return normalized;
         } catch (Exception e) {
             log.warn("[분석] 2차 JSON 파싱 실패: {}", e.getMessage());
@@ -218,6 +242,47 @@ public class CompanyAnalyzer {
         return result;
     }
 
+    private String buildCompanyOnlyPrompt(String companyName, DartCompanyData dartData) {
+        String dartSection = "";
+        if (dartData != null && dartData.hasData()) {
+            dartSection = "\n" + dartData.toPromptText() + "\n";
+        }
+
+        return """
+            아래 회사를 심층 분석하여 JSON으로 응답하세요.
+
+            [회사 정보]
+            회사명: %s
+            %s
+
+            다음 JSON 구조로 정확히 응답하세요 (값은 한국어로):
+            {
+              "companyOverview": "회사 소개. 핵심 사업, 시장 내 위치, 매출 규모 등을 구체적 고유명사와 함께 작성",
+              "coreProducts": [
+                {"name": "제품/서비스 고유명사", "description": "이 제품이 무엇이고 왜 중요한지 2~3문장"},
+                {"name": "제품/서비스 고유명사 2", "description": "설명"}
+              ],
+              "competitiveAdvantage": "경쟁사 대비 이 회사만의 차별점. 구체적 기술/사업 우위를 고유명사로",
+              "competitors": [
+                {"name": "경쟁사명", "differentiation": "이 회사가 경쟁사 대비 뛰어난 점"},
+                {"name": "경쟁사명 2", "differentiation": "차별점"}
+              ],
+              "companyValues": "회사의 핵심 가치와 조직 문화",
+              "techDirection": "현재 기술 방향성과 투자/전환 동향. 구체적 기술명과 이유를 포함",
+              "businessChallenges": "이 회사가 현재 직면한 사업/기술 과제 2~3가지",
+              "recentNews": "최근 1~2년간 주요 뉴스, 발표, 인수합병, 신사업 등",
+              "recentTrends": "이 회사/업계의 최근 동향과 전략 방향"
+            }
+
+            주의사항:
+            - 반드시 "%s"만 분석하세요. 모회사·자회사·같은 그룹의 다른 계열사를 혼동하지 마세요.
+            - 확실하지 않은 정보는 "정확한 정보 확인 불가"로 표기하세요. 잘못된 정보보다 낫습니다.
+            - 모든 필드에서 "금융 IT", "솔루션 기업" 같은 포괄 표현 금지. 반드시 제품명, 시스템명, 서비스명 등 고유명사를 포함하세요.
+            - coreProducts는 2~4개, competitors는 2~3개 작성하세요.
+            - DART 공시 데이터가 제공되었다면 이를 적극 활용하여 정확한 정보를 작성하세요.
+            """.formatted(companyName, dartSection, companyName);
+    }
+
     private String buildAnalysisPrompt(JobPosting jobPosting, List<EssayQuestion> questions,
                                         DartCompanyData dartData) {
         String questionsText = "";
@@ -277,6 +342,8 @@ public class CompanyAnalyzer {
             }
 
             주의사항:
+            - 반드시 "%s"만 분석하세요. 모회사·자회사·같은 그룹의 다른 계열사를 혼동하지 마세요. 예: "현대무빅스" 분석 시 "현대엘리베이터", "현대자동차" 정보를 쓰면 즉시 실패입니다.
+            - 확실하지 않은 정보는 "정확한 정보 확인 불가"로 표기하세요. 잘못된 정보보다 낫습니다.
             - 모든 필드에서 "금융 IT", "솔루션 기업" 같은 포괄 표현 금지. 반드시 제품명, 시스템명, 서비스명 등 고유명사를 포함하세요.
             - coreProducts는 2~4개, competitors는 2~3개 작성하세요.
             - questionGuides는 위에 제시된 자소서 문항 수만큼 생성하세요. 문항이 없으면 빈 배열 []로 두세요.
@@ -289,7 +356,8 @@ public class CompanyAnalyzer {
                 jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "(정보 없음)",
                 jobPosting.getRequirements() != null ? jobPosting.getRequirements() : "(정보 없음)",
                 dartSection,
-                questionsText.isBlank() ? "(자소서 문항 없음)" : questionsText
+                questionsText.isBlank() ? "(자소서 문항 없음)" : questionsText,
+                jobPosting.getCompanyName() != null ? jobPosting.getCompanyName() : "미상"
             );
     }
 }
