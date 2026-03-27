@@ -139,6 +139,7 @@ public class CoverLetterFacade {
 
         Map<Integer, CoverLetter> latestByQuestion = extractLatestByQuestion(allLetters);
         AiPort ai = aiRouter.route(jp.getCompanyType());
+        String jobContext = promptBuilder.buildJobContext(jp);
         List<CoverLetter> results = new ArrayList<>();
 
         // essayQuestionsJson에서 문항별 charLimit 매핑
@@ -165,7 +166,7 @@ public class CoverLetterFacade {
             log.info("[RAG] 문항 {} 검색된 경험 {}건, 주력 경험 ID: {}",
                 qIdx, experiences.size(), primary != null ? primary.getId() : "없음");
             CoverLetter improved = generateWithReviewLoop(
-                latest, jp, experiences, ai, latest.getQuestionText(), null, charLimit, userMessage);
+                latest, jp, experiences, ai, jobContext, latest.getQuestionText(), null, charLimit, userMessage);
             results.add(improved);
 
             log.info("[개선] 문항 {} 개선 완료 - v{} → v{}, 점수: {}",
@@ -249,6 +250,7 @@ public class CoverLetterFacade {
 
     private List<CoverLetter> generateCoverLetters(JobPosting jobPosting, List<EssayQuestion> essayQuestions) {
         AiPort ai = aiRouter.route(jobPosting.getCompanyType());
+        String jobContext = promptBuilder.buildJobContext(jobPosting);
 
         if (!userExperienceRepository.existsAny()) {
             log.warn("[경고] 등록된 경험(UserExperience)이 0건입니다. 자소서 품질이 크게 저하될 수 있습니다. " +
@@ -262,13 +264,13 @@ public class CoverLetterFacade {
             log.info("[RAG] 검색된 경험 {}건 (단일 자소서)", experiences.size());
 
             String prompt = promptBuilder.build(jobPosting, experiences, 1000);
-            String content = enforceCharLimit(ai.generate(prompt), 1000);
+            String content = enforceCharLimit(ai.generateWithContext(jobContext, prompt), 1000);
 
             CoverLetter coverLetter = CoverLetter.of(jobPosting, ai.getModelName(), content);
             coverLetterRepository.save(coverLetter);
 
             CoverLetter finalLetter = generateWithReviewLoop(
-                coverLetter, jobPosting, experiences, ai, null, null, 1000, null
+                coverLetter, jobPosting, experiences, ai, jobContext, null, null, 1000, null
             );
 
             jobPosting.markFinalized();
@@ -303,7 +305,7 @@ public class CoverLetterFacade {
 
             String prompt = promptBuilder.buildForQuestion(jobPosting, primary, secondary, question, masterPlan);
             int charLimit = question.charLimit() > 0 ? question.charLimit() : 1000;
-            String content = enforceCharLimit(ai.generate(prompt), charLimit);
+            String content = enforceCharLimit(ai.generateWithContext(jobContext, prompt), charLimit);
 
             CoverLetter coverLetter = CoverLetter.of(
                 jobPosting, ai.getModelName(), content,
@@ -312,7 +314,7 @@ public class CoverLetterFacade {
             coverLetterRepository.save(coverLetter);
 
             CoverLetter finalLetter = generateWithReviewLoop(
-                coverLetter, jobPosting, experiences, ai,
+                coverLetter, jobPosting, experiences, ai, jobContext,
                 question.questionText(), question, charLimit, null
             );
             finalLetters.add(finalLetter);
@@ -330,6 +332,7 @@ public class CoverLetterFacade {
 
     private CoverLetter generateWithReviewLoop(CoverLetter currentLetter, JobPosting jobPosting,
                                                 List<UserExperience> experiences, AiPort ai,
+                                                String jobContext,
                                                 String questionText, EssayQuestion essayQuestion,
                                                 int charLimit, String userMessage) {
         String currentDraft = currentLetter.getContent();
@@ -398,7 +401,9 @@ public class CoverLetterFacade {
                     jobPosting, experiences, questionText, currentDraft, review.rawJson(), iteration, targetedStrategy,
                     charLimit, userMessage
                 );
-                String improvedContent = enforceCharLimit(ai.generate(improvementPrompt), charLimit);
+                String improvedContent = enforceCharLimit(
+                    jobContext != null ? ai.generateWithContext(jobContext, improvementPrompt) : ai.generate(improvementPrompt),
+                    charLimit);
 
                 // 새 버전 저장
                 CoverLetter newVersion = CoverLetter.ofVersion(

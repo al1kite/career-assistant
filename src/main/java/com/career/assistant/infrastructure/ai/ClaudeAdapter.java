@@ -41,26 +41,48 @@ public class ClaudeAdapter implements AiPort {
 
     @Override
     public String generate(String prompt) {
-        return callClaude(DEFAULT_SYSTEM_PROMPT, prompt);
+        return callClaude(DEFAULT_SYSTEM_PROMPT, null, prompt);
+    }
+
+    @Override
+    public String generateWithContext(String cachedContext, String userPrompt) {
+        return callClaude(DEFAULT_SYSTEM_PROMPT, cachedContext, userPrompt);
     }
 
     @Override
     public String generate(String systemPrompt, String userPrompt) {
-        return callClaude(systemPrompt, userPrompt);
+        return callClaude(systemPrompt, null, userPrompt);
     }
 
-    private String callClaude(String systemPrompt, String userPrompt) {
+    @Override
+    public String generate(String systemPrompt, String cachedContext, String userPrompt) {
+        return callClaude(systemPrompt, cachedContext, userPrompt);
+    }
+
+    private String callClaude(String systemPrompt, String cachedContext, String userPrompt) {
         Map<String, Object> systemBlock = Map.of(
             "type", "text",
             "text", systemPrompt,
             "cache_control", Map.of("type", "ephemeral")
         );
 
+        // 캐시 컨텍스트가 있으면 user message를 2블록으로 분리 (컨텍스트 캐시 + 질문)
+        Object userContent;
+        if (cachedContext != null && !cachedContext.isBlank()) {
+            userContent = List.of(
+                Map.of("type", "text", "text", cachedContext,
+                        "cache_control", Map.of("type", "ephemeral")),
+                Map.of("type", "text", "text", userPrompt)
+            );
+        } else {
+            userContent = userPrompt;
+        }
+
         Map<String, Object> requestBody = Map.of(
             "model", modelName,
             "max_tokens", 4096,
             "system", List.of(systemBlock),
-            "messages", List.of(Map.of("role", "user", "content", userPrompt))
+            "messages", List.of(Map.of("role", "user", "content", userContent))
         );
 
         try {

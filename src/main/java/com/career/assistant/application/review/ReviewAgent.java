@@ -128,13 +128,14 @@ public class ReviewAgent {
     public ReviewResult review(String draft, JobPosting jobPosting, String question,
                                int iterationNum, List<UserExperience> providedExperiences,
                                int charLimit) {
+        String jobContext = buildJobContext(jobPosting);
         String userPrompt = buildReviewPrompt(draft, jobPosting, question, iterationNum, providedExperiences, charLimit);
         // 1차 리뷰는 Sonnet (개선 방향 결정), 2차+ Haiku (확인 점검)
         AiPort reviewer = (iterationNum == 1) ? claudeSonnet : claudeHaiku;
 
         try {
             log.info("[에이전트] {}차 검토 — 모델: {}", iterationNum, reviewer.getModelName());
-            String response = reviewer.generate(REVIEWER_SYSTEM_PROMPT, userPrompt);
+            String response = reviewer.generate(REVIEWER_SYSTEM_PROMPT, jobContext, userPrompt);
             return parseReviewResponse(response);
         } catch (Exception e) {
             log.error("[에이전트] 검토 중 오류 발생 (iteration {}): {}", iterationNum, e.getMessage());
@@ -147,14 +148,29 @@ public class ReviewAgent {
         return review(draft, jobPosting, question, iterationNum, List.of());
     }
 
+    /** 동일 공고 내 반복 호출 시 캐시되는 안정적 컨텍스트 */
+    private String buildJobContext(JobPosting jobPosting) {
+        String companyAnalysis = jobPosting.getCompanyAnalysis();
+        String analysisSection = (companyAnalysis != null && !companyAnalysis.isBlank())
+            ? "\n[회사 심층 분석 — 조직적합도 평가 시 참고]\n" + companyAnalysis + "\n"
+            : "";
+
+        return """
+            [채용공고 정보]
+            회사: %s
+            직무설명: %s
+            자격요건: %s
+            %s""".formatted(
+                jobPosting.getCompanyName(),
+                jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "",
+                jobPosting.getRequirements() != null ? jobPosting.getRequirements() : "",
+                analysisSection
+            );
+    }
+
     private String buildReviewPrompt(String draft, JobPosting jobPosting, String question,
                                       int iterationNum, List<UserExperience> providedExperiences,
                                       int charLimit) {
-        String companyAnalysis = jobPosting.getCompanyAnalysis();
-        String analysisSection = (companyAnalysis != null && !companyAnalysis.isBlank())
-            ? "\n            [회사 심층 분석 — 조직적합도 평가 시 참고]\n            " + companyAnalysis + "\n"
-            : "";
-
         String experienceSection = "";
         if (providedExperiences != null && !providedExperiences.isEmpty()) {
             String expList = providedExperiences.stream()
@@ -181,12 +197,7 @@ public class ReviewAgent {
 
         return """
             [검토 대상 자소서 — %d차 검토]
-
-            [채용공고 정보]
-            회사: %s
-            직무설명: %s
-            자격요건: %s
-            %s%s%s
+            %s%s
             [자소서 문항]
             %s
 
@@ -198,10 +209,6 @@ public class ReviewAgent {
             %s
             반드시 순수 JSON만 출력하세요.""".formatted(
                 iterationNum,
-                jobPosting.getCompanyName(),
-                jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "",
-                jobPosting.getRequirements() != null ? jobPosting.getRequirements() : "",
-                analysisSection,
                 experienceSection,
                 charLimitSection,
                 question != null ? question : "(단일 자소서)",

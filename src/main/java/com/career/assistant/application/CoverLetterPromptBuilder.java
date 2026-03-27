@@ -29,6 +29,30 @@ public class CoverLetterPromptBuilder {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /** 동일 공고 내 반복 호출 시 캐시되는 안정적 컨텍스트 (회사분석 + 채용공고) */
+    public String buildJobContext(JobPosting jobPosting) {
+        String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
+        String tone = resolveTone(jobPosting.getCompanyType());
+
+        return """
+            [기업 분석]
+            %s
+
+            [톤]
+            %s
+
+            [채용공고]
+            회사: %s
+            직무설명: %s
+            자격요건: %s""".formatted(
+                companyAnalysis,
+                tone,
+                jobPosting.getCompanyName(),
+                jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "(정보 없음)",
+                jobPosting.getRequirements() != null ? jobPosting.getRequirements() : "(정보 없음)"
+            );
+    }
+
     public String build(JobPosting jobPosting, List<UserExperience> experiences) {
         return build(jobPosting, experiences, 1000);
     }
