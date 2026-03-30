@@ -18,15 +18,6 @@ import java.util.stream.Collectors;
 @Component
 public class CoverLetterPromptBuilder {
 
-    private static final String EXPERIENCE_GROUNDING_RULES = """
-            [경험 사용 규칙 — 절대 위반 금지]
-            아래 제공된 경험만 사용하세요.
-            [주력 경험]이 제공되면 승(承) 단락의 핵심 소재로 사용하세요. 이 경험을 깊이 있게 풀어야 합니다.
-            [보조 경험]이 제공되면 다른 단락에서 간접적으로 언급하거나 역량 보충 근거로 활용하세요.
-            제공되지 않은 프로젝트, 회사, 수상 경력, 활동을 절대 지어내지 마세요.
-            경험의 제목, 기간, 기술스택, 성과 수치를 있는 그대로 인용하세요.
-            없는 경험을 쓰면 즉시 탈락입니다.""";
-
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** 동일 공고 내 반복 호출 시 캐시되는 안정적 컨텍스트 (회사분석 + 채용공고) */
@@ -62,127 +53,25 @@ public class CoverLetterPromptBuilder {
             .map(this::formatExperience)
             .collect(Collectors.joining("\n\n"));
 
-        String tone = resolveTone(jobPosting.getCompanyType());
-        String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
         String jobRoleDirective = buildJobRoleDirective(jobPosting, experiences);
         int targetMin = (int) (charLimit * 0.9);
 
         return """
             아래 채용공고와 지원자 경험을 바탕으로, 이 회사에만 쓸 수 있는 자소서를 작성하세요.
-            회사명을 다른 회사로 바꾸면 전혀 맞지 않는, 오직 이 회사만을 위한 글이어야 합니다.
 
-            [최우선 규칙]
-            순수 텍스트만 출력. 마크다운, 소제목, 번호, 불릿 전부 금지.
-            단락 사이 빈 줄 하나로 구분. 자소서 본문만 출력.
-            반드시 %d자 이내로 작성하세요. (공백 포함, 초과 시 탈락)
-            목표 범위: %d자 ~ %d자.
-            인사팀(비개발자)이 읽는다는 점을 항상 기억하세요.
+            [글자수 규칙]
+            반드시 %d자 이내. 목표 범위: %d자 ~ %d자.
             %s
-            [합격 자소서의 3대 조건 — 하나라도 빠지면 불합격]
-            1. 직무 직결성: 채용공고의 핵심 자격요건을 내 경험의 구체적 성과로 1:1 증명.
-               "Java 사용 가능" (X) → "Spring 기반 결제 API를 설계해 일 50만 건을 처리" (O)
-            2. 회사 고유성: 회사의 제품명·시스템명·사업 과제를 내 경험과 직접 연결.
-               "귀사의 성장에 기여" (X) → "토스의 송금 한도 증액 프로젝트에서 필요한 실시간 한도 검증 로직을, 제가 XX에서 설계한 실시간 정산 파이프라인 경험으로 풀 수 있습니다" (O)
-            3. 나만의 각도: 같은 직무 지원자 100명이 쓸 수 없는, 나만의 의사결정·관점·실패를 포함.
-               "성능을 개선했습니다" (X) → "캐시 도입이라는 팀 의견에 반대하고, 쿼리 실행계획 분석 후 인덱스 재설계를 제안했습니다. 이유는..." (O)
-
-            [기술 블로그 스타일 금지 — 위반 시 탈락]
-            이 글의 독자는 인사팀입니다. 개발자가 아닙니다.
-            - 기술 용어 3개 이상을 맥락 없이 나열하면 탈락입니다.
-            - 기술 이야기가 전체의 70%%를 넘으면 감점입니다.
-            - 모든 기술 언급에는 반드시 "왜 그 기술을 선택했는가" + "비즈니스 임팩트"가 동반되어야 합니다.
-            - 나쁜 예: "JPA N+1 문제를 해결하고 QueryDSL로 동적 쿼리를 최적화했습니다"
-            - 좋은 예: "주문 조회 API의 응답시간을 2.3초에서 0.4초로 줄여, 사용자 이탈률을 15%% 낮췄습니다"
-
-            [기업 분석 — 반드시 자소서에 반영할 것]
-            %s
-
             [기승전결 4단락 구성 — 제목 없이]
-
-            기(起) 단락 (약 150자) — 강렬한 도입.
-            "지원하게 된 계기는~" 절대 금지. 이 회사의 사업/기술/제품에서 발견한 구체적 포인트로 시작하세요.
-            채용공고에 나온 기술 키워드나 사업 내용을 정확히 짚으면서, "이 문제를 나도 풀어봤다" 또는 "이 방향에 내 경험이 정확히 맞닿는다"는 느낌을 주세요.
-            첫 문장이 면접관의 눈을 잡아야 합니다.
-
-            승(承) 단락 (약 300자) — 핵심 경험으로 역량 증명.
-            가장 관련성 높은 경험 1개를 깊이 있게 서술하세요. 나열 금지.
-            구체적 상황 → 내가 파악한 문제의 본질 → 내가 선택한 해결 방법과 그 이유 → 실행 과정 → 정량적 결과.
-            기술적 성과뿐 아니라 의사결정 과정, 팀 내 소통, 협업 경험을 함께 보여주세요.
-            기술 용어는 비즈니스 임팩트와 함께 쓰세요.
-
-            전(轉) 단락 (약 350자) — **합격을 결정하는 단락.**
-            이 회사의 구체적 사업 과제(기업분석의 businessChallenges)를 명시하고, 내 경험이 그 과제를 직접 풀 수 있음을 증명하세요.
-            나쁜 예: "이 회사에서도 비슷한 역할을 수행할 수 있습니다"
-            좋은 예: "[회사 제품명]의 [구체적 과제]는 제가 [경험]에서 [방법]으로 해결한 것과 같은 구조입니다. 당시 [정량적 결과]를 달성했고, 이 접근법이 [회사 과제]에 직접 적용됩니다."
-            회사 제품/서비스 고유명사를 단순 나열하지 말고, 반드시 내 경험과 엮어서 사용하세요.
-
-            결(結) 단락 (약 200자) — 입사 후 구체적 액션.
-            "열심히 하겠습니다", "기여하겠습니다" 같은 추상적 다짐은 0점입니다.
-            첫 3개월 안에 구체적으로 무엇을 하겠는지, 어떤 비즈니스 문제를 풀겠는지 쓰세요.
-            이 회사의 현재 과제와 본인의 역량이 만나는 지점을 보여주세요.
-
-            [HR 평가 포인트]
-            - 직무적합성: 이 직무를 수행할 구체적 역량과 경험이 보이는가?
-            - 조직적합성: 이 회사의 문화와 가치관에 맞는 사람인가?
-            - 성장가능성: 장기적으로 이 회사에서 성장하고 싶은 진정성이 있는가?
-
-            [평가 기준 — 8가지 모두 충족하세요]
-            1. 입사지원분야 경쟁력 → 자격요건과 경험을 직접 연결
-            2. 회사 분석 → 기업분석 고유명사 2개 이상 포함
-            3. 진부한 표현 없음 → [금지 표현] 준수
-            4. 구체적 경험 → 숫자, 프로젝트명, KPI 필수
-            5. 필요항목 빠짐없이 → 문항 하위 질문 모두 답변
-            6. 간결하고 명료 → 불필요한 수식어 삭제
-            7. 맞춤법/띄어쓰기 → 최종 점검
-            8. 열정 → 이 회사가 아니면 안 되는 절실함
-
-            [키워드 전략]
-            - 행동동사 중심: "설계했습니다", "주도했습니다", "구축했습니다"
-            - 수동적 표현 금지: "~하게 되었습니다", "~할 수 있었습니다", "~에 참여했습니다"
-            - 채용공고에 나온 기술/역량 키워드를 답변에 자연스럽게 포함하세요.
-            - 숫자와 고유명사를 반드시 포함하세요.
-
-            [금지 표현 — 하나라도 쓰면 탈락]
-            "의미 있다고 생각합니다" / "깊이 있는 이해" / "~에 기여하겠습니다"
-            "~를 극대화하겠습니다" / "이러한 경험은 ~에 활용될 수 있습니다"
-            "~의 중요성을 깨달았습니다" / "더 나아가" / "무엇보다"
-            "소중한 경험" / "값진 교훈" / "뜻깊은 시간"
-            같은 어미(~했습니다) 3회 연속 사용
-
-            [AI 판별 회피]
-            - 문장 리듬 변주: 짧은 문장과 긴 문장을 섞으세요.
-            - 구어체 전환어를 1~2회 자연스럽게 사용하세요: "솔직히", "돌이켜보면" 등.
-            - 같은 어미가 반복되지 않도록 변주하세요.
-
-            %s
-
-            [톤]
-            %s
-
-            [채용공고]
-            회사: %s
-            직무설명: %s
-            자격요건: %s
+            기(起) (약 150자) — 이 회사의 사업/기술/제품에서 발견한 구체적 포인트로 시작. "지원하게 된 계기는~" 금지.
+            승(承) (약 300자) — 핵심 경험 1개를 깊이 서술. 상황→문제→해결방법과 이유→실행→정량적 결과.
+            전(轉) (약 350자) — 합격을 결정하는 단락. 회사의 사업 과제를 명시하고 내 경험이 직접 풀 수 있음을 증명.
+            결(結) (약 200자) — 첫 3개월 구체적 액션.
 
             [지원자 경험]
-            %s
-
-            [최종 자가검증 — 모두 Yes가 아니면 처음부터 다시 쓰세요]
-            □ 이 자소서의 회사명을 바꾸면 다른 회사에 못 쓰는가?
-            □ 채용공고 자격요건 핵심 2가지 이상을 구체적 경험·수치로 증명했는가?
-            □ 회사 제품/서비스 고유명사가 내 경험과 연결되어 2회 이상 등장하는가?
-            □ 같은 직무 지원자 100명 중 나만 쓸 수 있는 고유한 관점·경험이 있는가?
-            □ 추상적 다짐 없이 구체적 액션과 수치로 끝맺는가?""".formatted(
-                charLimit,
-                targetMin,
-                charLimit,
+            %s""".formatted(
+                charLimit, targetMin, charLimit,
                 jobRoleDirective,
-                companyAnalysis,
-                EXPERIENCE_GROUNDING_RULES,
-                tone,
-                jobPosting.getCompanyName(),
-                jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "(정보 없음)",
-                jobPosting.getRequirements(),
                 experienceSummary
             );
     }
@@ -210,10 +99,8 @@ public class CoverLetterPromptBuilder {
         if (primary != null) allExperiences.add(primary);
         if (secondary != null) allExperiences.addAll(secondary);
 
-        String tone = resolveTone(jobPosting.getCompanyType());
         String questionType = classifyQuestionType(question.questionText());
         String typeGuide = getTypeGuide(questionType);
-        String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
         String questionGuide = buildQuestionGuide(jobPosting, question);
         String masterPlanSection = buildMasterPlanSection(masterPlan, question.number());
         String jobRoleDirective = buildJobRoleDirective(jobPosting, allExperiences);
@@ -221,36 +108,12 @@ public class CoverLetterPromptBuilder {
         int targetMin = (int) (charLimit * 0.9);
 
         return """
-            아래 채용공고의 자소서 문항에 대한 답변을 작성하세요.
-            이 회사에만 쓸 수 있는 답변이어야 합니다. 회사명을 바꾸면 맞지 않는 수준으로 쓰세요.
+            아래 자소서 문항에 대한 답변을 작성하세요.
 
-            [최우선 규칙]
-            순수 텍스트만 출력. 마크다운, 소제목, 번호, 불릿 전부 금지.
-            단락 사이 빈 줄 하나로 구분. 자소서 본문만 출력.
-            반드시 %d자 이내로 작성하세요. (공백 포함, 초과 시 탈락)
-            목표 범위: %d자 ~ %d자.
-            인사팀(비개발자)이 읽는다는 점을 항상 기억하세요.
+            [글자수 규칙]
+            반드시 %d자 이내. 목표 범위: %d자 ~ %d자.
             %s
-            [합격 자소서의 3대 조건 — 하나라도 빠지면 불합격]
-            1. 직무 직결성: 채용공고의 핵심 자격요건을 내 경험의 구체적 성과로 1:1 증명.
-               "Java 사용 가능" (X) → "Spring 기반 결제 API를 설계해 일 50만 건을 처리" (O)
-            2. 회사 고유성: 회사의 제품명·시스템명·사업 과제를 내 경험과 직접 연결.
-               "귀사의 성장에 기여" (X) → "토스의 송금 한도 증액 프로젝트에서 필요한 실시간 한도 검증 로직을, 제가 XX에서 설계한 실시간 정산 파이프라인 경험으로 풀 수 있습니다" (O)
-            3. 나만의 각도: 같은 직무 지원자 100명이 쓸 수 없는, 나만의 의사결정·관점·실패를 포함.
-               "성능을 개선했습니다" (X) → "캐시 도입이라는 팀 의견에 반대하고, 쿼리 실행계획 분석 후 인덱스 재설계를 제안했습니다. 이유는..." (O)
-
-            [기술 블로그 스타일 금지 — 위반 시 탈락]
-            이 글의 독자는 인사팀입니다. 개발자가 아닙니다.
-            - 기술 용어 3개 이상을 맥락 없이 나열하면 탈락입니다.
-            - 기술 이야기가 전체의 70%%를 넘으면 감점입니다.
-            - 모든 기술 언급에는 반드시 "왜 그 기술을 선택했는가" + "비즈니스 임팩트"가 동반되어야 합니다.
-            - 나쁜 예: "JPA N+1 문제를 해결하고 QueryDSL로 동적 쿼리를 최적화했습니다"
-            - 좋은 예: "주문 조회 API의 응답시간을 2.3초에서 0.4초로 줄여, 사용자 이탈률을 15%% 낮췄습니다"
-
             [문항 %d번]
-            %s
-
-            [기업 분석 — 반드시 답변에 반영할 것]
             %s
             %s
             [이 문항 전용 작성 가이드]
@@ -259,80 +122,22 @@ public class CoverLetterPromptBuilder {
             [문항 유형: %s]
             %s
 
-            [기승전결 서사 구조 — 이 문항에 맞게 적용]
-            기(起): 문항의 핵심 주제와 연결되는 강렬한 첫 문장. 이 회사의 구체적 특성을 짚으며 시작하세요.
-            승(承): 관련 경험 서술. 구체적 상황 → 문제 파악 → 해결 방법과 이유 → 실행 → 정량적 결과. 기술보다 의사결정 과정과 비즈니스 임팩트를 중심으로.
-            전(轉) **(합격을 결정하는 단락)**: 이 회사의 구체적 사업 과제(기업분석의 businessChallenges)를 명시하고, 내 경험이 그 과제를 직접 풀 수 있음을 증명하세요. "[회사 제품명]의 [과제]는 제가 [경험]에서 [방법]으로 해결한 것과 같은 구조" 수준의 구체성. 회사 고유명사를 내 경험과 엮어 사용. 단순 나열 금지.
-            결(結): 이 회사에서 구체적으로 무엇을 하겠는지. 첫 3개월 액션 플랜.
-            (글자수에 따라 단락 비중을 조절하되, 전(轉)에 가장 많은 비중을 두세요)
+            [기승전결 서사 구조]
+            기(起): 문항 핵심 주제와 연결되는 강렬한 첫 문장. 이 회사의 구체적 특성을 짚으며 시작.
+            승(承): 관련 경험 서술. 상황→문제→해결방법과 이유→실행→정량적 결과. 의사결정 과정과 비즈니스 임팩트 중심.
+            전(轉) **(합격을 결정하는 단락)**: 회사의 사업 과제를 명시하고 내 경험이 직접 풀 수 있음을 증명. 회사 고유명사를 내 경험과 엮어 사용.
+            결(結): 첫 3개월 구체적 액션 플랜. (전(轉)에 가장 많은 비중)
 
-            [HR 평가 포인트]
-            - 직무적합성: 이 직무를 수행할 구체적 역량과 경험이 보이는가?
-            - 조직적합성: 이 회사의 문화와 가치관에 맞는 사람인가?
-            - 성장가능성: 장기적으로 이 회사에서 성장하고 싶은 진정성이 있는가?
-
-            [평가 기준 — 8가지 모두 충족하세요]
-            1. 입사지원분야 경쟁력 → 자격요건과 경험을 직접 연결
-            2. 회사 분석 → 기업분석 고유명사 2개 이상 포함
-            3. 진부한 표현 없음 → [금지 표현] 준수
-            4. 구체적 경험 → 숫자, 프로젝트명, KPI 필수
-            5. 필요항목 빠짐없이 → 문항 하위 질문 모두 답변
-            6. 간결하고 명료 → 불필요한 수식어 삭제
-            7. 맞춤법/띄어쓰기 → 최종 점검
-            8. 열정 → 이 회사가 아니면 안 되는 절실함
-
-            [키워드 전략]
-            - 행동동사 중심: "설계했습니다", "주도했습니다", "구축했습니다"
-            - 수동적 표현 금지: "~하게 되었습니다", "~할 수 있었습니다", "~에 참여했습니다"
-            - 채용공고에 나온 기술/역량 키워드를 답변에 자연스럽게 포함하세요.
-            - 숫자와 고유명사를 반드시 포함하세요.
-
-            [금지 표현]
-            "의미 있다고 생각합니다" / "깊이 있는 이해" / "~에 기여하겠습니다"
-            "~를 극대화하겠습니다" / "이러한 경험은 ~에 활용될 수 있습니다"
-            "~의 중요성을 깨달았습니다" / "더 나아가" / "무엇보다"
-            "소중한 경험" / "값진 교훈" / "뜻깊은 시간"
-            같은 어미(~했습니다) 3회 연속 사용
-
-            [AI 판별 회피]
-            - 문장 리듬 변주: 짧은 문장과 긴 문장을 섞으세요.
-            - 구어체 전환어를 1~2회 자연스럽게 사용하세요: "솔직히", "돌이켜보면" 등.
-            - 같은 어미가 반복되지 않도록 변주하세요.
-
-            %s
-
-            [톤]
-            %s
-
-            [채용공고]
-            회사: %s
-            직무설명: %s
-            자격요건: %s
-
-            %s
-
-            [최종 자가검증 — 모두 Yes가 아니면 처음부터 다시 쓰세요]
-            □ 이 자소서의 회사명을 바꾸면 다른 회사에 못 쓰는가?
-            □ 채용공고 자격요건 핵심 2가지 이상을 구체적 경험·수치로 증명했는가?
-            □ 회사 제품/서비스 고유명사가 내 경험과 연결되어 2회 이상 등장하는가?
-            □ 같은 직무 지원자 100명 중 나만 쓸 수 있는 고유한 관점·경험이 있는가?
-            □ 추상적 다짐 없이 구체적 액션과 수치로 끝맺는가?""".formatted(
-                charLimit,
-                targetMin,
-                charLimit,
+            [지원자 경험]
+            %s""".formatted(
+                charLimit, targetMin, charLimit,
                 jobRoleDirective,
                 question.number(),
                 question.questionText(),
-                companyAnalysis,
                 masterPlanSection,
                 questionGuide.isBlank() ? "(분석 데이터 없음 — 채용공고에서 직접 파악하세요)" : questionGuide,
                 questionType,
                 typeGuide,
-                EXPERIENCE_GROUNDING_RULES,
-                tone,
-                jobPosting.getCompanyName(),
-                jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "(정보 없음)",
-                jobPosting.getRequirements(),
                 experienceSummary
             );
     }
@@ -378,8 +183,6 @@ public class CoverLetterPromptBuilder {
         if (primary != null) allExperiences.add(primary);
         if (secondary != null) allExperiences.addAll(secondary);
 
-        String tone = resolveTone(jobPosting.getCompanyType());
-        String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
         String jobRoleDirective = buildJobRoleDirective(jobPosting, allExperiences);
 
         String userMessageSection = "";
@@ -430,19 +233,7 @@ public class CoverLetterPromptBuilder {
             [자소서 문항]
             %s
 
-            [기업 분석]
-            %s
-
-            [톤]
-            %s
-
-            [채용공고]
-            회사: %s
-            직무설명: %s
-            자격요건: %s
-
-            %s
-
+            [지원자 경험]
             %s
 
             위 피드백을 모두 반영하여 개선된 자소서를 작성하세요. 주력 경험을 중심으로 유지하되, 피드백에 따라 서술을 개선하세요. 자소서 본문만 출력하세요.""".formatted(
@@ -453,12 +244,6 @@ public class CoverLetterPromptBuilder {
                 reviewFeedbackJson,
                 previousDraft,
                 question != null ? question : "(단일 자소서)",
-                companyAnalysis,
-                tone,
-                jobPosting.getCompanyName(),
-                jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "(정보 없음)",
-                jobPosting.getRequirements() != null ? jobPosting.getRequirements() : "",
-                EXPERIENCE_GROUNDING_RULES,
                 experienceSummary
             );
     }
