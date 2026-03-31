@@ -214,6 +214,7 @@ public class JsoupCrawler {
         String requirements = "";
         String deadline = "";
         List<EssayQuestion> essayQuestions = new ArrayList<>();
+        List<EmploymentOption> employmentOptions = new ArrayList<>();
 
         // 1순위: JSON-LD (schema.org/JobPosting) 파싱
         for (Element script : doc.select("script[type=application/ld+json]")) {
@@ -284,11 +285,30 @@ public class JsoupCrawler {
                         companyInfo.append("[홈페이지] ").append(homepage).append("\n\n");
                     }
 
-                    // employments[] 배열에서 직무 정보 추출
+                    // employments[] 배열에서 모든 직무 옵션 수집
                     JsonNode employments = company.path("employments");
                     if (employments.isArray() && !employments.isEmpty()) {
-                        JsonNode emp = employments.get(0);
+                        for (JsonNode emp : employments) {
+                            int empId = emp.path("id").asInt(0);
+                            String empField = emp.path("field").asText("");
+                            String empTitle = emp.path("title").asText(
+                                emp.path("position_name").asText(""));
+                            String empDept = emp.path("department").asText("");
+                            int empResumes = emp.path("resumes_count").asInt(
+                                emp.path("resume_count").asInt(0));
+                            employmentOptions.add(new EmploymentOption(empId, empField, empTitle, empDept, empResumes));
+                        }
 
+                        if (employmentOptions.size() > 1) {
+                            log.info("자소설닷컴 다중 직무 감지: {}개 — {}",
+                                employmentOptions.size(),
+                                employmentOptions.stream()
+                                    .map(o -> o.field() + "(" + o.id() + ")")
+                                    .reduce((a, b) -> a + ", " + b).orElse(""));
+                        }
+
+                        // 첫 번째 employment로 기본 JD 구성 (하위호환)
+                        JsonNode emp = employments.get(0);
                         String field = emp.path("field").asText("");
                         String positionName = emp.path("title").asText(
                             emp.path("position_name").asText(""));
@@ -385,8 +405,93 @@ public class JsoupCrawler {
             }
         }
 
-        log.info("자소설닷컴 크롤링 성공 - 회사: {}, 마감: {}, 문항수: {}", companyName, deadline, essayQuestions.size());
-        return CrawledJobInfo.of(companyName, jobDescription, requirements, deadline, true, essayQuestions);
+        log.info("자소설닷컴 크롤링 성공 - 회사: {}, 마감: {}, 문항수: {}, 직무옵션: {}개",
+            companyName, deadline, essayQuestions.size(), employmentOptions.size());
+        return CrawledJobInfo.of(companyName, jobDescription, requirements, deadline, true,
+            essayQuestions, employmentOptions);
+    }
+
+    /**
+     * 특정 employment ID의 상세 정보를 인증 API로 재조회합니다.
+     * 해당 employment의 field/title/department + 자소서 문항을 반환합니다.
+     */
+    public CrawledJobInfo fetchForEmployment(String url, int employmentId) {
+        log.info("자소설닷컴 employment 재조회 — employment_id={}", employmentId);
+
+        if (jasoseolUserToken == null || jasoseolUserToken.isBlank()) {
+            throw new CrawlingException("자소설닷컴 인증 토큰이 없어 employment 재조회 불가");
+        }
+
+        try {
+            String requestBody = "{\"employment_id\":" + employmentId + "}";
+            Connection.Response resp = Jsoup.connect("https://jasoseol.com/resume/new_employment.json")
+                .userAgent(USER_AGENT)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .cookie("jssUserToken", jasoseolUserToken)
+                .requestBody(requestBody)
+                .method(Connection.Method.POST)
+                .ignoreContentType(true)
+                .ignoreHttpErrors(true)
+                .timeout(10_000)
+                .execute();
+
+            if (resp.statusCode() != 200) {
+                throw new CrawlingException("자소설닷컴 인증 API 실패 (status=" + resp.statusCode() + ")");
+            }
+
+            JsonNode data = objectMapper.readTree(resp.body());
+
+            // employment 상세 정보 추출
+            StringBuilder jobDesc = new StringBuilder();
+            String empTitle = data.path("title").asText(data.path("position_name").asText(""));
+            String empField = data.path("field").asText("");
+            String empDepartment = data.path("department").asText("");
+            String empCareerType = data.path("career_type").asText("");
+            String empDescription = data.path("description").asText("");
+
+            if (!empTitle.isBlank()) jobDesc.append("[포지션] ").append(empTitle).append("\n");
+            if (!empField.isBlank()) jobDesc.append("[직무 분야] ").append(empField).append("\n");
+            if (!empDepartment.isBlank()) jobDesc.append("[부서] ").append(empDepartment).append("\n");
+            if (!empCareerType.isBlank()) jobDesc.append("[경력 구분] ").append(empCareerType).append("\n");
+            if (!empDescription.isBlank()) jobDesc.append("[채용 설명]\n").append(empDescription).append("\n");
+
+            // 자소서 문항 추출
+            List<EssayQuestion> questions = new ArrayList<>();
+            JsonNode qnas = data.path("qnas");
+            if (qnas.isArray() && !qnas.isEmpty()) {
+                for (JsonNode qna : qnas) {
+                    int number = qna.path("number").asInt(0);
+                    String questionText = qna.path("question").asText("");
+                    int charLimit = qna.path("total_count").asInt(0);
+                    if (!questionText.isBlank()) {
+                        questions.add(new EssayQuestion(number, questionText.trim(), charLimit));
+                    }
+                }
+            }
+
+            // 기존 크롤링 결과에서 회사명/마감일을 가져오기 위해 원본 URL 재크롤링
+            Document doc = Jsoup.connect(url)
+                .userAgent(USER_AGENT)
+                .timeout(10_000)
+                .get();
+
+            String companyName = doc.select("meta[property=og:title]").attr("content");
+            companyName = parseCompanyNameFromTitle(companyName);
+            if (companyName.isBlank()) {
+                companyName = doc.title();
+            }
+
+            log.info("자소설닷컴 employment 재조회 성공 — field={}, 문항={}개", empField, questions.size());
+
+            return CrawledJobInfo.of(companyName, jobDesc.toString(), "", null, true, questions);
+
+        } catch (CrawlingException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("자소설닷컴 employment 재조회 실패: {}", e.getMessage());
+            throw new CrawlingException("employment 재조회 실패: " + e.getMessage());
+        }
     }
 
     private List<EssayQuestion> extractEssayQuestionsFromJson(JsonNode pageProps) {

@@ -22,6 +22,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.career.assistant.infrastructure.crawling.EmploymentOption;
+
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -206,6 +208,38 @@ public class CoverLetterFacade {
         try {
             // 1단계: 크롤링
             CrawledJobInfo crawledInfo = jsoupCrawler.crawl(jobPosting.getUrl());
+
+            // 1-1단계: 다중 직무 공고 자동 매칭
+            if (crawledInfo.employmentOptions().size() > 1) {
+                List<UserExperience> experiences = userExperienceRepository.findAll();
+                EmploymentOption best = findBestEmployment(crawledInfo.employmentOptions(), experiences);
+                if (best != null && best.id() != crawledInfo.employmentOptions().get(0).id()) {
+                    log.info("[매칭] 사용자 경험 기반 직무 자동 선택: {} (id={}) ← 기본: {} (id={})",
+                        best.field(), best.id(),
+                        crawledInfo.employmentOptions().get(0).field(),
+                        crawledInfo.employmentOptions().get(0).id());
+                    try {
+                        CrawledJobInfo refined = jsoupCrawler.fetchForEmployment(
+                            jobPosting.getUrl(), best.id());
+                        crawledInfo = CrawledJobInfo.of(
+                            crawledInfo.companyName(),
+                            refined.jobDescription().isBlank()
+                                ? crawledInfo.jobDescription() : refined.jobDescription(),
+                            crawledInfo.requirements(),
+                            crawledInfo.deadline(),
+                            crawledInfo.active(),
+                            refined.essayQuestions().isEmpty()
+                                ? crawledInfo.essayQuestions() : refined.essayQuestions(),
+                            crawledInfo.employmentOptions()
+                        );
+                    } catch (Exception e) {
+                        log.warn("[매칭] 선택된 employment 재조회 실패 — 기본 직무로 진행: {}", e.getMessage());
+                    }
+                } else if (best != null) {
+                    log.info("[매칭] 기본 선택 직무가 최적: {} (id={})", best.field(), best.id());
+                }
+            }
+
             List<EssayQuestion> essayQuestions = crawledInfo.essayQuestions();
 
             String essayQuestionsJson = serializeQuestions(essayQuestions);
@@ -619,6 +653,101 @@ public class CoverLetterFacade {
             case "성장과정" -> "가치관 경험 전환점 성장";
             default -> "";
         };
+    }
+
+    EmploymentOption findBestEmployment(List<EmploymentOption> options, List<UserExperience> experiences) {
+        if (options.isEmpty()) return null;
+        if (experiences.isEmpty()) return options.get(0);
+
+        // 모든 경험에서 skills 추출
+        Set<String> skillKeywords = new LinkedHashSet<>();
+        for (UserExperience exp : experiences) {
+            if (exp.getSkills() != null && !exp.getSkills().isBlank()) {
+                for (String skill : exp.getSkills().split("[,/·]+")) {
+                    String trimmed = skill.trim().toLowerCase();
+                    if (!trimmed.isBlank() && trimmed.length() >= 2) {
+                        skillKeywords.add(trimmed);
+                    }
+                }
+            }
+        }
+        if (skillKeywords.isEmpty()) return options.get(0);
+
+        // 역할 추론
+        String combined = String.join(" ", skillKeywords);
+        String inferredDomain = inferDomain(combined);
+        log.info("[매칭] 사용자 기술스택 기반 추론 도메인: {}, 키워드: {}", inferredDomain, skillKeywords);
+
+        // 각 employment의 field와 매칭
+        EmploymentOption best = null;
+        int bestScore = -1;
+
+        for (EmploymentOption option : options) {
+            int score = calcMatchScore(option.field(), option.title(), option.department(), inferredDomain);
+            log.debug("[매칭] employment id={} field='{}' title='{}' → score={}",
+                option.id(), option.field(), option.title(), score);
+            if (score > bestScore) {
+                bestScore = score;
+                best = option;
+            }
+        }
+
+        return best;
+    }
+
+    private String inferDomain(String combinedSkills) {
+        int sw = countKeywordMatches(combinedSkills,
+            "java", "spring", "jpa", "python", "react", "javascript", "typescript",
+            "kotlin", "go", "rust", "node", "django", "flask", "vue", "angular",
+            "backend", "frontend", "백엔드", "프론트엔드", "서버", "웹",
+            "mysql", "postgresql", "redis", "kafka", "docker", "kubernetes",
+            "aws", "gcp", "azure", "linux", "git", "ci", "cd",
+            "tensorflow", "pytorch", "pandas", "ml", "ai", "데이터",
+            "software", "소프트웨어", "개발", "프로그래밍", "알고리즘");
+        int mechanical = countKeywordMatches(combinedSkills,
+            "solidworks", "catia", "autocad", "기계", "설계", "유한요소",
+            "열역학", "유체", "재료", "항공", "자동차", "금형", "cam", "cnc");
+        int electrical = countKeywordMatches(combinedSkills,
+            "전기", "전자", "회로", "pcb", "반도체", "임베디드", "embedded",
+            "plc", "fpga", "vhdl", "verilog", "아날로그", "디지털");
+
+        if (sw >= mechanical && sw >= electrical) return "SW";
+        if (mechanical > sw && mechanical >= electrical) return "기계";
+        if (electrical > sw && electrical > mechanical) return "전기전자";
+        return "SW";
+    }
+
+    private int calcMatchScore(String field, String title, String department, String inferredDomain) {
+        String combined = (field + " " + title + " " + department).toLowerCase();
+        int score = 0;
+
+        if ("SW".equals(inferredDomain)) {
+            String[] keywords = {"sw", "소프트웨어", "컴퓨터", "it", "개발", "프로그래밍",
+                "software", "데이터", "ai", "인공지능", "클라우드", "웹", "앱"};
+            for (String kw : keywords) {
+                if (combined.contains(kw)) score++;
+            }
+        } else if ("기계".equals(inferredDomain)) {
+            String[] keywords = {"기계", "항공", "설계", "자동차", "mechanical", "메카", "생산"};
+            for (String kw : keywords) {
+                if (combined.contains(kw)) score++;
+            }
+        } else if ("전기전자".equals(inferredDomain)) {
+            String[] keywords = {"전기", "전자", "회로", "반도체", "electrical", "electronic", "임베디드"};
+            for (String kw : keywords) {
+                if (combined.contains(kw)) score++;
+            }
+        }
+
+        return score;
+    }
+
+    private int countKeywordMatches(String text, String... keywords) {
+        int count = 0;
+        for (String kw : keywords) {
+            if (text.contains(kw)) count++;
+        }
+        return count;
     }
 
     private LocalDate parseDeadline(String deadline) {
