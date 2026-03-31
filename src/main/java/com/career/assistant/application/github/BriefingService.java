@@ -20,7 +20,10 @@ public class BriefingService {
     private final TelegramBotHandler telegramBotHandler;
     private final DailyTasksHolder dailyTasksHolder;
 
-    public void executeBriefing() {
+    /**
+     * @return true if briefing completed successfully, false on failure
+     */
+    public boolean executeBriefing() {
         log.info("Morning briefing started");
 
         try {
@@ -32,7 +35,7 @@ public class BriefingService {
             } catch (LearningAdvisor.NoActivityDataException e) {
                 log.warn("No activity data for briefing: {}", e.getMessage());
                 telegramBotHandler.sendMessage("GitHub 활동 데이터가 없어 브리핑을 생성할 수 없습니다.");
-                return;
+                return true; // 데이터 없음은 시스템 장애가 아닌 정상 경로
             }
 
             dailyTasksHolder.update(rec.todayTasks());
@@ -68,10 +71,12 @@ public class BriefingService {
             }
 
             log.info("Morning briefing completed");
+            return true;
 
         } catch (Exception e) {
             log.error("Morning briefing failed", e);
             telegramBotHandler.sendMessage("아침 브리핑 생성 중 오류가 발생했습니다. 로그를 확인해주세요.");
+            return false;
         }
     }
 
@@ -79,7 +84,7 @@ public class BriefingService {
         return rec.gaps().stream()
             .max(Comparator.comparingInt(this::severityPriority)
                 .thenComparingInt(LearningRecommendation.LearningGap::gapDays))
-            .orElse(rec.gaps().get(0));
+            .orElseGet(() -> rec.gaps().get(0));
     }
 
     private int severityPriority(LearningRecommendation.LearningGap gap) {

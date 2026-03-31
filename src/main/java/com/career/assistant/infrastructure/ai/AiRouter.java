@@ -16,9 +16,7 @@ public class AiRouter {
     private final AiPort claudeHaiku;
 
     public AiPort route(CompanyType companyType) {
-        return switch (companyType) {
-            case LARGE_CORP, FINANCE -> claudeSonnet; // 정교한 문체 필요
-            case STARTUP, MID_IT, UNKNOWN -> claudeHaiku; // 빠르고 저렴하게
-        };
+        // 자소서 생성은 항상 Sonnet — 품질이 최우선
+        return claudeSonnet;
     }
 }

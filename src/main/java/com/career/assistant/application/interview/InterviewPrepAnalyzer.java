@@ -3,12 +3,11 @@ package com.career.assistant.application.interview;
 import com.career.assistant.common.AiResponseParser;
 import com.career.assistant.domain.experience.UserExperience;
 import com.career.assistant.domain.experience.UserExperienceRepository;
-import com.career.assistant.domain.jobposting.CompanyType;
 import com.career.assistant.domain.jobposting.JobPosting;
 import com.career.assistant.infrastructure.ai.AiPort;
-import com.career.assistant.infrastructure.ai.AiRouter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -41,29 +40,26 @@ public class InterviewPrepAnalyzer {
         - 반드시 순수 JSON만 출력하세요. 마크다운 코드블록(```) 없이 JSON만 출력하세요.
         - 모든 내용은 한국어로 작성""";
 
-    private final AiRouter aiRouter;
+    private final AiPort claudeHaiku;
     private final UserExperienceRepository userExperienceRepository;
     private final ObjectMapper objectMapper;
 
-    public InterviewPrepAnalyzer(AiRouter aiRouter,
+    public InterviewPrepAnalyzer(@Qualifier("claudeHaiku") AiPort claudeHaiku,
                                   UserExperienceRepository userExperienceRepository,
                                   ObjectMapper objectMapper) {
-        this.aiRouter = aiRouter;
+        this.claudeHaiku = claudeHaiku;
         this.userExperienceRepository = userExperienceRepository;
         this.objectMapper = objectMapper;
     }
 
     public InterviewPrepResult analyze(JobPosting jobPosting) {
-        CompanyType companyType = jobPosting.getCompanyType() != null
-            ? jobPosting.getCompanyType() : CompanyType.UNKNOWN;
-        AiPort ai = aiRouter.route(companyType);
         List<UserExperience> experiences = userExperienceRepository.findAll();
 
         String userPrompt = buildUserPrompt(jobPosting, experiences);
-        log.info("[면접준비] AI 분석 요청 — {} (모델: {})", jobPosting.getCompanyName(), ai.getModelName());
+        log.info("[면접준비] AI 분석 요청 — {} (모델: {})", jobPosting.getCompanyName(), claudeHaiku.getModelName());
 
         try {
-            String response = ai.generate(SYSTEM_PROMPT, userPrompt);
+            String response = claudeHaiku.generate(SYSTEM_PROMPT, userPrompt);
             log.info("[면접준비] AI 응답 수신 — {}", jobPosting.getCompanyName());
             return parseResponse(response);
         } catch (Exception e) {

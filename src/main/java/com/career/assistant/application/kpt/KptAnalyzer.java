@@ -1,6 +1,7 @@
 package com.career.assistant.application.kpt;
 
 import com.career.assistant.application.github.LearningRecommendation.DailyTask;
+import com.career.assistant.common.GitHubRepoRegistry;
 import com.career.assistant.domain.kpt.KptRecord;
 import com.career.assistant.domain.kpt.KptRecordRepository;
 import com.career.assistant.infrastructure.ai.AiPort;
@@ -10,7 +11,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -34,7 +34,8 @@ public class KptAnalyzer {
         - Keep: 아침 브리핑 추천 중 실행한 것 + 추천 외 추가로 한 것
         - Problem: 추천했지만 실행하지 못한 것 + 이유 추정
         - Try: 내일 구체적으로 시도할 것 (시간/분량 포함)
-        - completionRate: 아침 브리핑 추천 태스크 대비 실제 달성률 (0~100)
+        - completionRate: 아침 브리핑 추천 태스크 대비 실제 달성률 (0~100).
+          단, 추천 태스크가 없는 경우(주말/브리핑 미실행)에는 커밋 활동량에 비례하여 산정.
 
         [톤]
         - 비난 금지. 격려 + 구체적 제안
@@ -58,31 +59,22 @@ public class KptAnalyzer {
     private final KptRecordRepository kptRecordRepository;
     private final GitHubClient gitHubClient;
     private final DailyTasksHolder dailyTasksHolder;
-
-    @Value("${github.username}")
-    private String username;
-
-    @Value("${github.repos.coding-test}")
-    private String codingTestRepo;
-
-    @Value("${github.repos.blog}")
-    private String blogRepo;
-
-    @Value("${github.repos.cs-study}")
-    private String csStudyRepo;
+    private final GitHubRepoRegistry repoRegistry;
 
     public KptAnalyzer(
         @Qualifier("claudeHaiku") AiPort claude,
         ObjectMapper objectMapper,
         KptRecordRepository kptRecordRepository,
         GitHubClient gitHubClient,
-        DailyTasksHolder dailyTasksHolder
+        DailyTasksHolder dailyTasksHolder,
+        GitHubRepoRegistry repoRegistry
     ) {
         this.claude = claude;
         this.objectMapper = objectMapper;
         this.kptRecordRepository = kptRecordRepository;
         this.gitHubClient = gitHubClient;
         this.dailyTasksHolder = dailyTasksHolder;
+        this.repoRegistry = repoRegistry;
     }
 
     public KptRecord analyze() {
@@ -114,16 +106,16 @@ public class KptAnalyzer {
         LocalDateTime sinceUtc = kstStartOfDay.withZoneSameInstant(ZoneId.of("UTC")).toLocalDateTime();
         StringBuilder sb = new StringBuilder();
 
-        appendRepoCommits(sb, codingTestRepo, "코딩테스트", sinceUtc);
-        appendRepoCommits(sb, blogRepo, "블로그", sinceUtc);
-        appendRepoCommits(sb, csStudyRepo, "CS 스터디", sinceUtc);
+        for (var repo : repoRegistry.getTrackedRepos()) {
+            appendRepoCommits(sb, repo.name(), repo.label(), sinceUtc);
+        }
 
         return sb.isEmpty() ? "오늘 GitHub 커밋 없음" : sb.toString().strip();
     }
 
     private void appendRepoCommits(StringBuilder sb, String repo, String label,
                                     LocalDateTime since) {
-        List<GitHubCommit> commits = gitHubClient.getCommits(username, repo, since);
+        List<GitHubCommit> commits = gitHubClient.getCommits(repoRegistry.getUsername(), repo, since);
         if (commits.isEmpty()) return;
 
         sb.append("[").append(label).append("]\n");
@@ -137,11 +129,23 @@ public class KptAnalyzer {
     }
 
     private String buildUserPrompt(String todayActivity, List<DailyTask> todayTasks) {
-        String tasksData = todayTasks.isEmpty()
-            ? "오늘 아침 브리핑 데이터 없음"
-            : todayTasks.stream()
-                .map(t -> "- [%s] %s".formatted(t.category(), t.action()))
-                .collect(Collectors.joining("\n"));
+        if (todayTasks.isEmpty()) {
+            return """
+                [안내] 오늘은 아침 브리핑이 실행되지 않았습니다 (주말 또는 서버 재시작).
+                추천 태스크 대비 달성률 비교가 불가능하므로, GitHub 커밋 활동만 기반으로 분석하세요.
+                커밋이 있으면 자발적 학습으로 높이 평가하고, completionRate는 커밋 활동량에 비례하여 산정하세요.
+                커밋이 없더라도 주말 휴식은 자연스러운 것이므로 격려해주세요.
+
+                [오늘 GitHub 활동]
+                %s
+
+                위 데이터를 기반으로 KPT JSON을 생성해주세요.
+                """.formatted(todayActivity);
+        }
+
+        String tasksData = todayTasks.stream()
+            .map(t -> "- [%s] %s".formatted(t.category(), t.action()))
+            .collect(Collectors.joining("\n"));
 
         return """
             [오늘 아침 브리핑 추천 태스크]

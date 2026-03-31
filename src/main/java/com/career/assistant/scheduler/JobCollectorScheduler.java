@@ -18,9 +18,13 @@ import java.util.List;
 @ConditionalOnProperty(name = "job-collector.enabled", havingValue = "true")
 public class JobCollectorScheduler {
 
+    private static final String COLLECT_TASK = "채용공고 수집";
+    private static final String DEADLINE_TASK = "마감 임박 알림";
+
     private final JobCollectorService jobCollectorService;
     private final JobCollectorMessageFormatter messageFormatter;
     private final TelegramBotHandler telegramBotHandler;
+    private final SchedulerHealthMonitor healthMonitor;
 
     @Scheduled(cron = "${job-collector.cron-collect:0 0 8 * * *}", zone = "Asia/Seoul")
     public void collectNewPostings() {
@@ -33,9 +37,11 @@ public class JobCollectorScheduler {
                 telegramBotHandler.sendMessage(message);
             }
             log.info("채용공고 수집 완료 — 신규 {}건", newPostings.size());
+            healthMonitor.recordSuccess(COLLECT_TASK);
         } catch (Exception e) {
             log.error("채용공고 수집 실패", e);
             telegramBotHandler.sendMessage("채용공고 수집에 실패했습니다. 로그를 확인해주세요.");
+            healthMonitor.recordFailure(COLLECT_TASK, e);
         }
     }
 
@@ -50,9 +56,11 @@ public class JobCollectorScheduler {
                 telegramBotHandler.sendMessage(message);
             }
             log.info("마감 임박 알림 완료 — {}건", upcoming.size());
+            healthMonitor.recordSuccess(DEADLINE_TASK);
         } catch (Exception e) {
             log.error("마감 임박 알림 실패", e);
             telegramBotHandler.sendMessage("마감 임박 알림 처리에 실패했습니다. 로그를 확인해주세요.");
+            healthMonitor.recordFailure(DEADLINE_TASK, e);
         }
     }
 }

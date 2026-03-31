@@ -92,12 +92,26 @@ public class LearningAdvisor {
                 a.getStatus().name()))
             .collect(Collectors.joining("\n"));
 
+        List<String> solved = gitHubAnalyzer.getSolvedProblems();
+        String solvedSection = "";
+        if (!solved.isEmpty()) {
+            String solvedList = solved.stream()
+                .limit(100)
+                .collect(Collectors.joining(", "));
+            solvedSection = """
+
+            [이미 푼 문제 — 절대 추천 금지]
+            %s
+            위 문제들은 이미 풀었으므로 problems에서 반드시 제외하세요. 같은 문제를 다른 표현으로 추천하는 것도 금지합니다.
+            """.formatted(solvedList);
+        }
+
         return """
             [학습 현황 데이터]
             %s
-
+            %s
             위 데이터를 분석하여 학습 공백, 오늘 할 일, 코테 추천 문제, CS 퀴즈, 블로그 주제를 JSON으로 추천해주세요.
-            """.formatted(activityData);
+            """.formatted(activityData, solvedSection);
     }
 
     private LearningRecommendation parseResponse(String response) {

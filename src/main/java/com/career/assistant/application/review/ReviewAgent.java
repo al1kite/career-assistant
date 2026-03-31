@@ -40,6 +40,12 @@ public class ReviewAgent {
         - "기여하겠습니다", "성장하겠습니다" 같은 추상적 다짐이 있으면 authenticity -15점.
         - 회사명만 바꾸면 다른 회사에도 쓸 수 있는 내용이면 orgFit 최대 50점.
 
+        [직무·회사 맞춤도 특별 검증]
+        - 채용공고 자격요건 상위 3개를 식별하고, 자소서에서 각각에 대한 구체적 증거가 있는지 확인. 1개 이하면 jobFit 최대 50점.
+        - 회사 고유명사(제품/서비스/시스템명)가 지원자 경험과 연결되어 사용되었는지 확인. 단순 나열이면 orgFit -15점.
+        - "이 자소서의 회사명을 바꾸면 다른 회사에도 쓸 수 있는가?" 테스트. 가능하면 orgFit 최대 40점.
+        - 같은 직무 지원자 100명이 비슷하게 쓸 수 있는 내용이면 authenticity 최대 45점.
+
         [기술 블로그 스타일 보정 규칙]
         - 기술 용어 3개 이상을 맥락(이유/임팩트) 없이 나열 → authenticity -20, aiDetectionRisk +15.
         - 기술 이야기가 전체의 70% 이상 → orgFit 최대 40.
@@ -58,17 +64,30 @@ public class ReviewAgent {
         [평가 항목 — 9개]
         1. 답변적합도 (가중치 10%): 질문이 묻는 것에 정확히 답했는가? 질문 의도를 벗어나면 0점.
         2. 직무적합도 (가중치 20%): 당장 투입하면 일할 수 있겠는가? 기술 스택, 유사 경험, 구체적 성과.
-        3. 조직적합도 (가중치 15%): 회사명을 바꾸면 못 쓸 정도로 특화됐는가? 이 회사만의 문화/방향 이해. 회사 제품/서비스 고유명사 필수.
+        3. 조직적합도 (가중치 20%): 회사명을 바꾸면 못 쓸 정도로 특화됐는가? 이 회사만의 문화/방향 이해. 회사 제품/서비스 고유명사 필수.
         4. 구체성 (가중치 15%): 숫자, 프로젝트명, 정량적 성과가 있는가? "열심히 했다"는 0점.
         5. 진정성/개성 (가중치 10%): 이 사람만의 고유한 이야기인가? 누구나 쓸 수 있는 말이면 0점.
         6. AI탐지 위험도 (가중치 10%): AI가 쓴 것 같은 패턴이 있는가? (높을수록 위험) 같은 어미 반복, 추상적 미사여구, 정형화된 구조.
-        7. 논리적 구조 (가중치 5%): 기승전결 흐름이 명확한가? 각 단락이 유기적으로 연결되는가?
+        7. 논리적 구조 (가중치 3%): 기승전결 흐름이 명확한가? 각 단락이 유기적으로 연결되는가?
         8. 키워드 활용 (가중치 10%): 채용공고의 핵심 키워드가 자연스럽게 녹아있는가?
-        9. 경험 일관성 (가중치 5%): 자소서에 언급된 경험이 [제공된 경험 목록]과 일치하는가? 제공되지 않은 프로젝트, 회사, 수상 경력이 언급되면 0점.
+        9. 경험 일관성 (가중치 2%): 자소서에 언급된 경험이 [제공된 경험 목록]과 일치하는가? 제공되지 않은 프로젝트, 회사, 수상 경력이 언급되면 0점.
+
+        [8대 평가 기준 ↔ 9개 세부 점수 매핑]
+        아래 8대 평가 기준을 반드시 점검하고, 해당 세부 점수에 반영하세요:
+        1. 입사지원분야 경쟁력 → jobFit, keywordUsage
+        2. 회사 분석 → orgFit (고유명사 2개 이상 필수)
+        3. 진부한 표현 없음 → authenticity, aiDetectionRisk
+        4. 구체적 경험 → specificity, experienceConsistency
+        5. 필요항목 빠짐없이 → answerRelevance
+        6. 간결하고 명료 → logicalStructure
+        7. 맞춤법/띄어쓰기 → violations에 지적
+        8. 열정 → orgFit, authenticity
 
         [피드백 규칙]
         - violations: 반드시 문장을 인용하고 구체적 문제를 지적하세요. "좀 더 구체적으로" 같은 모호한 피드백 금지.
         - improvements: 현재 문장을 인용 → 문제점 → 개선 방향 → 개선 예시를 포함하세요.
+        - overallComment에서 8대 평가 기준 중 부족한 항목을 번호와 함께 명시적으로 언급하세요.
+          예: "기준 2(회사 분석) — 고유명사가 1개뿐입니다. 기준 4(구체적 경험) — 정량적 수치가 부족합니다."
 
         [출력 형식]
         반드시 아래 JSON 형식만 출력하세요. 다른 텍스트, 설명, 마크다운 절대 금지.
@@ -86,7 +105,7 @@ public class ReviewAgent {
           },
           "violations": ["문장 인용 + 구체적 문제 지적", ...],
           "improvements": ["현재 문장 인용 → 개선 방향 → 예시", ...],
-          "overallComment": "전체 총평 (2~3문장)"
+          "overallComment": "전체 총평 (2~3문장). 8대 평가 기준 중 부족한 항목을 번호와 함께 명시."
         }""";
 
     private final AiPort claudeHaiku;
@@ -109,17 +128,18 @@ public class ReviewAgent {
     public ReviewResult review(String draft, JobPosting jobPosting, String question,
                                int iterationNum, List<UserExperience> providedExperiences,
                                int charLimit) {
+        String jobContext = buildJobContext(jobPosting);
         String userPrompt = buildReviewPrompt(draft, jobPosting, question, iterationNum, providedExperiences, charLimit);
-        // 1차 리뷰는 Sonnet (개선 방향을 결정하는 가장 중요한 리뷰), 이후는 Haiku
+        // 1차 리뷰는 Sonnet (개선 방향 결정), 2차+ Haiku (확인 점검)
         AiPort reviewer = (iterationNum == 1) ? claudeSonnet : claudeHaiku;
 
+        log.info("[에이전트] {}차 검토 — 모델: {}", iterationNum, reviewer.getModelName());
         try {
-            log.info("[에이전트] {}차 검토 — 모델: {}", iterationNum, reviewer.getModelName());
-            String response = reviewer.generate(REVIEWER_SYSTEM_PROMPT, userPrompt);
+            String response = reviewer.generate(REVIEWER_SYSTEM_PROMPT, jobContext, userPrompt);
             return parseReviewResponse(response);
         } catch (Exception e) {
-            log.error("[에이전트] 검토 중 오류 발생 (iteration {}): {}", iterationNum, e.getMessage());
-            return ReviewResult.fallback();
+            throw new ReviewGenerationException(
+                "리뷰 생성 실패 (%d차, 모델: %s)".formatted(iterationNum, reviewer.getModelName()), e);
         }
     }
 
@@ -128,14 +148,29 @@ public class ReviewAgent {
         return review(draft, jobPosting, question, iterationNum, List.of());
     }
 
+    /** 동일 공고 내 반복 호출 시 캐시되는 안정적 컨텍스트 */
+    private String buildJobContext(JobPosting jobPosting) {
+        String companyAnalysis = jobPosting.getCompanyAnalysis();
+        String analysisSection = (companyAnalysis != null && !companyAnalysis.isBlank())
+            ? "\n[회사 심층 분석 — 조직적합도 평가 시 참고]\n" + companyAnalysis + "\n"
+            : "";
+
+        return """
+            [채용공고 정보]
+            회사: %s
+            직무설명: %s
+            자격요건: %s
+            %s""".formatted(
+                jobPosting.getCompanyName(),
+                jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "",
+                jobPosting.getRequirements() != null ? jobPosting.getRequirements() : "",
+                analysisSection
+            );
+    }
+
     private String buildReviewPrompt(String draft, JobPosting jobPosting, String question,
                                       int iterationNum, List<UserExperience> providedExperiences,
                                       int charLimit) {
-        String companyAnalysis = jobPosting.getCompanyAnalysis();
-        String analysisSection = (companyAnalysis != null && !companyAnalysis.isBlank())
-            ? "\n            [회사 심층 분석 — 조직적합도 평가 시 참고]\n            " + companyAnalysis + "\n"
-            : "";
-
         String experienceSection = "";
         if (providedExperiences != null && !providedExperiences.isEmpty()) {
             String expList = providedExperiences.stream()
@@ -162,12 +197,7 @@ public class ReviewAgent {
 
         return """
             [검토 대상 자소서 — %d차 검토]
-
-            [채용공고 정보]
-            회사: %s
-            직무설명: %s
-            자격요건: %s
-            %s%s%s
+            %s%s
             [자소서 문항]
             %s
 
@@ -179,10 +209,6 @@ public class ReviewAgent {
             %s
             반드시 순수 JSON만 출력하세요.""".formatted(
                 iterationNum,
-                jobPosting.getCompanyName(),
-                jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "",
-                jobPosting.getRequirements() != null ? jobPosting.getRequirements() : "",
-                analysisSection,
                 experienceSection,
                 charLimitSection,
                 question != null ? question : "(단일 자소서)",
@@ -196,20 +222,22 @@ public class ReviewAgent {
             String json = extractJson(response);
             JsonNode root = objectMapper.readTree(json);
 
-            JsonNode scoresNode = root.get("scores");
-            int experienceConsistency = scoresNode.has("experienceConsistency")
-                ? scoresNode.get("experienceConsistency").asInt() : 80;
+            JsonNode scoresNode = root.path("scores");
+            if (scoresNode.isMissingNode() || !scoresNode.isObject()) {
+                log.warn("[에이전트] 검토 결과에 scores 객체 없음 — 폴백 적용");
+                return ReviewResult.fallback();
+            }
 
             ReviewResult.Scores scores = new ReviewResult.Scores(
-                scoresNode.get("answerRelevance").asInt(),
-                scoresNode.get("jobFit").asInt(),
-                scoresNode.get("orgFit").asInt(),
-                scoresNode.get("specificity").asInt(),
-                scoresNode.get("authenticity").asInt(),
-                scoresNode.get("aiDetectionRisk").asInt(),
-                scoresNode.get("logicalStructure").asInt(),
-                scoresNode.get("keywordUsage").asInt(),
-                experienceConsistency
+                scoresNode.path("answerRelevance").asInt(50),
+                scoresNode.path("jobFit").asInt(50),
+                scoresNode.path("orgFit").asInt(50),
+                scoresNode.path("specificity").asInt(50),
+                scoresNode.path("authenticity").asInt(50),
+                scoresNode.path("aiDetectionRisk").asInt(50),
+                scoresNode.path("logicalStructure").asInt(50),
+                scoresNode.path("keywordUsage").asInt(50),
+                scoresNode.path("experienceConsistency").asInt(80)
             );
 
             List<String> violations = parseStringArray(root.get("violations"));

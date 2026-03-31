@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -40,6 +41,17 @@ public class GitHubAnalyzer {
 
     private static final Pattern BAEKJOON_TIER_PATTERN =
         Pattern.compile("\\[(Gold|Silver|Bronze)", Pattern.CASE_INSENSITIVE);
+
+    // 커밋 메시지에서 문제 제목 추출: [Gold III] Title #12345 또는 [level 2] Title #12345
+    private static final Pattern PROBLEM_TITLE_PATTERN =
+        Pattern.compile("\\[(?:Gold|Silver|Bronze|Platinum|Diamond|Ruby|level)\\s*[IVX\\d]+]\\s*(.+?)(?:\\s*#\\d+)?$",
+            Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
+
+    // 파일 경로에서 문제 제목 추출: 백준/Gold/12345. Title/ 또는 프로그래머스/3/12345. Title/
+    private static final Pattern FILE_PROBLEM_PATTERN =
+        Pattern.compile("(?:백준|프로그래머스)/[^/]+/(\\d+\\.\\s*.+?)/");
+
+    private final List<String> solvedProblems = new CopyOnWriteArrayList<>();
 
     @Transactional
     public void syncAll() {
@@ -71,14 +83,24 @@ public class GitHubAnalyzer {
         // topic -> (lastCommitAt, count)
         Map<String, LocalDateTime> lastCommitMap = new HashMap<>();
         Map<String, Integer> countMap = new HashMap<>();
+        Set<String> solved = new LinkedHashSet<>();
 
         for (GitHubCommit commit : commits) {
             String topic = classifyFromMessage(commit.getMessage());
+            String problemTitle = extractProblemTitle(commit.getMessage());
 
+            List<String> files = List.of();
             if (topic == null) {
-                // Fallback: check file paths
-                List<String> files = gitHubClient.getCommitFiles(username, codingTestRepo, commit.sha());
+                files = gitHubClient.getCommitFiles(username, codingTestRepo, commit.sha());
                 topic = classifyFromFiles(files);
+            }
+
+            if (problemTitle == null && !files.isEmpty()) {
+                problemTitle = extractProblemTitleFromFiles(files);
+            }
+
+            if (problemTitle != null) {
+                solved.add(problemTitle);
             }
 
             if (topic == null) {
@@ -92,6 +114,10 @@ public class GitHubAnalyzer {
                     (existing, newDate) -> newDate.isAfter(existing) ? newDate : existing);
             }
         }
+
+        solvedProblems.clear();
+        solvedProblems.addAll(solved);
+        log.info("[코테] 풀었던 문제 {}건 추출 완료", solved.size());
 
         saveActivities(codingTestRepo, lastCommitMap, countMap);
     }
@@ -182,6 +208,30 @@ public class GitHubAnalyzer {
         }
 
         saveActivities(csStudyRepo, lastCommitMap, countMap);
+    }
+
+    public List<String> getSolvedProblems() {
+        return Collections.unmodifiableList(solvedProblems);
+    }
+
+    String extractProblemTitle(String message) {
+        if (message == null || message.isBlank()) return null;
+        String firstLine = message.split("\n")[0].trim();
+        Matcher m = PROBLEM_TITLE_PATTERN.matcher(firstLine);
+        if (m.find()) {
+            return m.group(1).trim();
+        }
+        return null;
+    }
+
+    private String extractProblemTitleFromFiles(List<String> files) {
+        for (String file : files) {
+            Matcher m = FILE_PROBLEM_PATTERN.matcher(file);
+            if (m.find()) {
+                return m.group(1).trim();
+            }
+        }
+        return null;
     }
 
     String classifyFromMessage(String message) {

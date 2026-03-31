@@ -18,7 +18,7 @@ public class JobPosting {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(columnDefinition = "TEXT", nullable = false)
+    @Column(length = 500, nullable = false, unique = true)
     private String url;
 
     @Column(name = "company_name")
