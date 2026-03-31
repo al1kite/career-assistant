@@ -4,8 +4,10 @@ import com.career.assistant.domain.experience.UserExperience;
 import com.career.assistant.domain.jobposting.CompanyType;
 import com.career.assistant.domain.jobposting.JobPosting;
 import com.career.assistant.infrastructure.crawling.EssayQuestion;
+import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -17,6 +19,12 @@ import java.util.stream.Collectors;
 @Slf4j
 @Component
 public class CoverLetterPromptBuilder {
+
+    private static final ObjectMapper LENIENT_MAPPER = JsonMapper.builder()
+        .enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
+        .enable(JsonReadFeature.ALLOW_TRAILING_COMMA)
+        .enable(JsonReadFeature.ALLOW_SINGLE_QUOTES)
+        .build();
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -309,7 +317,13 @@ public class CoverLetterPromptBuilder {
         if (masterPlanJson == null || masterPlanJson.isBlank()) return "";
 
         try {
-            JsonNode plan = objectMapper.readTree(masterPlanJson);
+            // markdown fence 제거 + 관용 파싱 (AI 생성 JSON의 trailing comma 등 허용)
+            String cleaned = masterPlanJson.strip();
+            if (cleaned.startsWith("```")) {
+                cleaned = cleaned.replaceFirst("```(?:json)?\\s*", "");
+                cleaned = cleaned.replaceFirst("\\s*```$", "");
+            }
+            JsonNode plan = LENIENT_MAPPER.readTree(cleaned);
             StringBuilder sb = new StringBuilder();
             sb.append("\n[전체 자소서 전략 — 반드시 따를 것]\n");
 

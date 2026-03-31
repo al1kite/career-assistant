@@ -31,7 +31,7 @@ public class DartCorpCodeCache {
     private static final Duration CACHE_TTL = Duration.ofDays(7);
 
     private final DartProperties properties;
-    private final Map<String, String> corpCodeMap = new LinkedHashMap<>();
+    private volatile Map<String, String> corpCodeMap = Map.of();
     private Instant lastLoadTime;
     private volatile boolean loading = false;
 
@@ -64,16 +64,27 @@ public class DartCorpCodeCache {
         code = corpCodeMap.get("㈜" + withoutCorp);
         if (code != null) return Optional.of(code);
 
-        // 4. 부분 매칭 (결과가 정확히 1건일 때만)
-        var partialMatches = corpCodeMap.entrySet().stream()
-            .filter(e -> e.getKey().contains(withoutCorp) || withoutCorp.contains(e.getKey()))
-            .toList();
-        if (partialMatches.size() == 1) {
-            log.info("[DART] 부분 매칭 성공: '{}' → '{}'", companyName, partialMatches.get(0).getKey());
-            return Optional.of(partialMatches.get(0).getValue());
+        // 4. 부분 매칭 (결과가 정확히 1건일 때만) — 불변 스냅샷이므로 스레드 안전
+        Map<String, String> snapshot = corpCodeMap;
+        int partialMatchCount = 0;
+        Map.Entry<String, String> singleMatch = null;
+        for (Map.Entry<String, String> e : snapshot.entrySet()) {
+            String key = e.getKey();
+            if (key.contains(withoutCorp) || withoutCorp.contains(key)) {
+                partialMatchCount++;
+                if (partialMatchCount == 1) {
+                    singleMatch = e;
+                } else {
+                    break;
+                }
+            }
+        }
+        if (partialMatchCount == 1 && singleMatch != null) {
+            log.info("[DART] 부분 매칭 성공: '{}' → '{}'", companyName, singleMatch.getKey());
+            return Optional.of(singleMatch.getValue());
         }
 
-        log.debug("[DART] 회사 코드 매핑 실패: {} (부분매칭 {}건)", companyName, partialMatches.size());
+        log.debug("[DART] 회사 코드 매핑 실패: {} (부분매칭 {}건)", companyName, partialMatchCount);
         return Optional.empty();
     }
 
@@ -144,7 +155,10 @@ public class DartCorpCodeCache {
         }
 
         // ZIP 압축 해제 → XML 저장
-        Files.createDirectories(targetXmlPath.getParent());
+        Path parent = targetXmlPath.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
         try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(response.body()))) {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
@@ -159,7 +173,8 @@ public class DartCorpCodeCache {
 
     private void loadFromXmlFile(Path xmlPath) throws Exception {
         log.info("[DART] corpCode.xml 파싱 중: {}", xmlPath);
-        corpCodeMap.clear();
+
+        Map<String, String> tempMap = new LinkedHashMap<>();
 
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
@@ -172,10 +187,12 @@ public class DartCorpCodeCache {
             String corpCode = getTagValue(el, "corp_code");
             String corpName = getTagValue(el, "corp_name");
             if (corpCode != null && corpName != null) {
-                corpCodeMap.put(corpName.trim(), corpCode.trim());
+                tempMap.put(corpName.trim(), corpCode.trim());
             }
         }
 
+        // 불변 스냅샷으로 한 번에 교체 — 읽기 스레드와의 동시성 문제 방지
+        corpCodeMap = Map.copyOf(tempMap);
         lastLoadTime = Instant.now();
         log.info("[DART] corpCode 로딩 완료: {}개 기업", corpCodeMap.size());
     }

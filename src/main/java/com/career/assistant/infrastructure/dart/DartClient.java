@@ -10,6 +10,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.zip.ZipEntry;
@@ -173,7 +174,7 @@ public class DartClient {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
                 if (entry.getName().endsWith(".xml") || entry.getName().endsWith(".html")) {
-                    return new String(zis.readAllBytes(), "UTF-8");
+                    return new String(zis.readAllBytes(), StandardCharsets.UTF_8);
                 }
             }
         } catch (Exception e) {

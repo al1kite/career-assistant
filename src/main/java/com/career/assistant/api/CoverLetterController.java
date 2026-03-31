@@ -170,22 +170,20 @@ public class CoverLetterController {
     }
 
     @Operation(summary = "회사 분석 결과 조회", description = "AI가 생성한 회사 심층 분석 및 문항별 작성 가이드를 조회합니다. 분석이 없으면 자동 생성합니다.")
-    @Transactional
     @GetMapping("/analysis")
     public ResponseEntity<?> getAnalysis(@RequestParam Long jobPostingId) {
         return jobPostingRepository.findById(jobPostingId)
             .map(jp -> {
                 String analysis = jp.getCompanyAnalysis();
 
-                // 분석이 없으면 자동 생성
+                // 분석이 없으면 자동 생성 (트랜잭션 범위를 저장 시점으로 최소화)
                 if (analysis == null || analysis.isBlank()) {
                     log.info("[분석] 분석 데이터 없음 — 자동 생성 시작: {}", jp.getCompanyName());
                     try {
                         List<EssayQuestion> questions = deserializeEssayQuestions(jp.getEssayQuestionsJson());
                         analysis = companyAnalyzer.analyze(jp, questions);
                         if (analysis != null) {
-                            jp.updateCompanyAnalysis(analysis);
-                            jobPostingRepository.save(jp);
+                            saveCompanyAnalysis(jp.getId(), analysis);
                             log.info("[분석] 자동 생성 완료: {}", jp.getCompanyName());
                         } else {
                             return ResponseEntity.ok(Map.of(
@@ -223,6 +221,14 @@ public class CoverLetterController {
                 }
             })
             .orElse(ResponseEntity.notFound().build());
+    }
+
+    @Transactional
+    protected void saveCompanyAnalysis(Long jobPostingId, String analysis) {
+        jobPostingRepository.findById(jobPostingId).ifPresent(jp -> {
+            jp.updateCompanyAnalysis(analysis);
+            jobPostingRepository.save(jp);
+        });
     }
 
     private List<EssayQuestion> deserializeEssayQuestions(String json) {

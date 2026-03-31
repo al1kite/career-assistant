@@ -24,6 +24,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import jakarta.annotation.PreDestroy;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -74,6 +75,19 @@ public class TelegramBotHandler extends TelegramLongPollingBot {
         this.interviewPrepMessageFormatter = interviewPrepMessageFormatter;
         this.objectMapper = objectMapper;
         this.chatId = chatId;
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        telegramSendExecutor.shutdown();
+        try {
+            if (!telegramSendExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                telegramSendExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            telegramSendExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Override
