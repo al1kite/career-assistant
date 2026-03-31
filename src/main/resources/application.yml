@@ -1,0 +1,53 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/career_assistant}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+
+telegram:
+  bot-token: ${TELEGRAM_BOT_TOKEN}
+  chat-id: ${TELEGRAM_CHAT_ID}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+jasoseol:
+  user-token: ${JASOSEOL_USER_TOKEN:}
+
+github:
+  token: ${GITHUB_TOKEN}
+  username: ${GITHUB_USERNAME:al1kite}
+  repos:
+    coding-test: coding-test
+    blog: al1kite.github.io
+    cs-study: cs-study
+    career-assistant: career-assistant
+
+job-collector:
+  enabled: true
+  keywords: 백엔드,Java,Spring,서버,금융,증권,핀테크
+  cron-collect: "0 0 8 * * *"
+  cron-deadline: "0 0 9 * * *"
+  max-pages: 3
+
+dart:
+  api-key: ${DART_API_KEY:}
+  corp-code-path: "./data/dart-corp-codes.xml"
+
+ai:
+  claude:
+    api-key: ${CLAUDE_API_KEY}
+    sonnet-model: claude-sonnet-4-6
+    haiku-model: claude-haiku-4-5-20251001
+    base-url: https://api.anthropic.com/v1/messages
