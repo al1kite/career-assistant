@@ -4,26 +4,53 @@ import com.career.assistant.domain.experience.UserExperience;
 import com.career.assistant.domain.jobposting.CompanyType;
 import com.career.assistant.domain.jobposting.JobPosting;
 import com.career.assistant.infrastructure.crawling.EssayQuestion;
+import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Component
 public class CoverLetterPromptBuilder {
 
-    private static final String EXPERIENCE_GROUNDING_RULES = """
-            [경험 사용 규칙 — 절대 위반 금지]
-            아래 [지원자 경험]에 제공된 경험만 사용하세요.
-            제공되지 않은 프로젝트, 회사, 수상 경력, 활동을 절대 지어내지 마세요.
-            경험의 제목, 기간, 기술스택, 성과 수치를 있는 그대로 인용하세요.
-            없는 경험을 쓰면 즉시 탈락입니다.""";
+    private static final ObjectMapper LENIENT_MAPPER = JsonMapper.builder()
+        .enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
+        .enable(JsonReadFeature.ALLOW_TRAILING_COMMA)
+        .enable(JsonReadFeature.ALLOW_SINGLE_QUOTES)
+        .build();
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    /** 동일 공고 내 반복 호출 시 캐시되는 안정적 컨텍스트 (회사분석 + 채용공고) */
+    public String buildJobContext(JobPosting jobPosting) {
+        String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
+        String tone = resolveTone(jobPosting.getCompanyType());
+
+        return """
+            [기업 분석]
+            %s
+
+            [톤]
+            %s
+
+            [채용공고]
+            회사: %s
+            직무설명: %s
+            자격요건: %s""".formatted(
+                companyAnalysis,
+                tone,
+                jobPosting.getCompanyName(),
+                jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "(정보 없음)",
+                jobPosting.getRequirements() != null ? jobPosting.getRequirements() : "(정보 없음)"
+            );
+    }
 
     public String build(JobPosting jobPosting, List<UserExperience> experiences) {
         return build(jobPosting, experiences, 1000);
@@ -34,219 +61,91 @@ public class CoverLetterPromptBuilder {
             .map(this::formatExperience)
             .collect(Collectors.joining("\n\n"));
 
-        String tone = resolveTone(jobPosting.getCompanyType());
-        String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
+        String jobRoleDirective = buildJobRoleDirective(jobPosting, experiences);
         int targetMin = (int) (charLimit * 0.9);
 
         return """
             아래 채용공고와 지원자 경험을 바탕으로, 이 회사에만 쓸 수 있는 자소서를 작성하세요.
-            회사명을 다른 회사로 바꾸면 전혀 맞지 않는, 오직 이 회사만을 위한 글이어야 합니다.
 
-            [최우선 규칙]
-            순수 텍스트만 출력. 마크다운, 소제목, 번호, 불릿 전부 금지.
-            단락 사이 빈 줄 하나로 구분. 자소서 본문만 출력.
-            반드시 %d자 이내로 작성하세요. (공백 포함, 초과 시 탈락)
-            목표 범위: %d자 ~ %d자.
-            인사팀(비개발자)이 읽는다는 점을 항상 기억하세요.
-
-            [기술 블로그 스타일 금지 — 위반 시 탈락]
-            이 글의 독자는 인사팀입니다. 개발자가 아닙니다.
-            - 기술 용어 3개 이상을 맥락 없이 나열하면 탈락입니다.
-            - 기술 이야기가 전체의 70%%를 넘으면 감점입니다.
-            - 모든 기술 언급에는 반드시 "왜 그 기술을 선택했는가" + "비즈니스 임팩트"가 동반되어야 합니다.
-            - 나쁜 예: "JPA N+1 문제를 해결하고 QueryDSL로 동적 쿼리를 최적화했습니다"
-            - 좋은 예: "주문 조회 API의 응답시간을 2.3초에서 0.4초로 줄여, 사용자 이탈률을 15%% 낮췄습니다"
-
-            [기업 분석 — 반드시 자소서에 반영할 것]
+            [글자수 규칙]
+            반드시 %d자 이내. 목표 범위: %d자 ~ %d자.
             %s
-
             [기승전결 4단락 구성 — 제목 없이]
-
-            기(起) 단락 (약 150자) — 강렬한 도입.
-            "지원하게 된 계기는~" 절대 금지. 이 회사의 사업/기술/제품에서 발견한 구체적 포인트로 시작하세요.
-            채용공고에 나온 기술 키워드나 사업 내용을 정확히 짚으면서, "이 문제를 나도 풀어봤다" 또는 "이 방향에 내 경험이 정확히 맞닿는다"는 느낌을 주세요.
-            첫 문장이 면접관의 눈을 잡아야 합니다.
-
-            승(承) 단락 (약 300자) — 핵심 경험으로 역량 증명.
-            가장 관련성 높은 경험 1개를 깊이 있게 서술하세요. 나열 금지.
-            구체적 상황 → 내가 파악한 문제의 본질 → 내가 선택한 해결 방법과 그 이유 → 실행 과정 → 정량적 결과.
-            기술적 성과뿐 아니라 의사결정 과정, 팀 내 소통, 협업 경험을 함께 보여주세요.
-            기술 용어는 비즈니스 임팩트와 함께 쓰세요.
-
-            전(轉) 단락 (약 350자) — **이 회사와의 연결 (가장 중요한 단락).**
-            내 경험이 왜 이 회사에서 중요한지, 이 회사가 지금 직면한 과제나 추구하는 방향과 내 역량이 어떻게 맞물리는지를 보여주세요.
-            기업 분석의 businessChallenges, competitiveAdvantage, techDirection을 직접 인용하여 연결하세요.
-            회사의 제품/서비스 고유명사를 반드시 언급하세요.
-            "이 회사가 아니면 안 되는 이유"가 여기서 드러나야 합니다.
-
-            결(結) 단락 (약 200자) — 입사 후 구체적 액션.
-            "열심히 하겠습니다", "기여하겠습니다" 같은 추상적 다짐은 0점입니다.
-            첫 3개월 안에 구체적으로 무엇을 하겠는지, 어떤 비즈니스 문제를 풀겠는지 쓰세요.
-            이 회사의 현재 과제와 본인의 역량이 만나는 지점을 보여주세요.
-
-            [충성도 표현 — 자연스럽게 녹이세요]
-            - 이 회사의 제품/서비스/기술을 직접 경험한 이야기를 포함하세요.
-            - 경쟁사가 아닌 이 회사를 선택한 구체적 이유가 드러나야 합니다.
-            - 회사의 최근 행보나 기술 방향에 대한 구체적 언급을 포함하세요.
-
-            [HR 평가 포인트]
-            - 직무적합성: 이 직무를 수행할 구체적 역량과 경험이 보이는가?
-            - 조직적합성: 이 회사의 문화와 가치관에 맞는 사람인가?
-            - 성장가능성: 장기적으로 이 회사에서 성장하고 싶은 진정성이 있는가?
-            - 기술 나열이 아니라 '왜 그 기술을 선택했는가'의 판단 과정을 보여주세요.
-            - 인사팀은 '이 사람과 함께 일하고 싶은가?'를 봅니다.
-
-            [키워드 전략]
-            - 행동동사 중심: "설계했습니다", "주도했습니다", "구축했습니다"
-            - 수동적 표현 금지: "~하게 되었습니다", "~할 수 있었습니다", "~에 참여했습니다"
-            - 채용공고에 나온 기술/역량 키워드를 답변에 자연스럽게 포함하세요.
-            - 숫자와 고유명사를 반드시 포함하세요.
-
-            [금지 표현 — 하나라도 쓰면 탈락]
-            "의미 있다고 생각합니다" / "깊이 있는 이해" / "~에 기여하겠습니다"
-            "~를 극대화하겠습니다" / "이러한 경험은 ~에 활용될 수 있습니다"
-            "~의 중요성을 깨달았습니다" / "더 나아가" / "무엇보다"
-            "소중한 경험" / "값진 교훈" / "뜻깊은 시간"
-            같은 어미(~했습니다) 3회 연속 사용
-
-            [AI 판별 회피]
-            - 문장 리듬 변주: 짧은 문장과 긴 문장을 섞으세요.
-            - 구어체 전환어를 1~2회 자연스럽게 사용하세요: "솔직히", "돌이켜보면" 등.
-            - 같은 어미가 반복되지 않도록 변주하세요.
-
-            %s
-
-            [톤]
-            %s
-
-            [채용공고]
-            회사: %s
-            직무설명: %s
-            자격요건: %s
+            기(起) (약 150자) — 이 회사의 사업/기술/제품에서 발견한 구체적 포인트로 시작. "지원하게 된 계기는~" 금지.
+            승(承) (약 300자) — 핵심 경험 1개를 깊이 서술. 상황→문제→해결방법과 이유→실행→정량적 결과.
+            전(轉) (약 350자) — 합격을 결정하는 단락. 회사의 사업 과제를 명시하고 내 경험이 직접 풀 수 있음을 증명.
+            결(結) (약 200자) — 첫 3개월 구체적 액션.
 
             [지원자 경험]
             %s""".formatted(
-                charLimit,
-                targetMin,
-                charLimit,
-                companyAnalysis,
-                EXPERIENCE_GROUNDING_RULES,
-                tone,
-                jobPosting.getCompanyName(),
-                jobPosting.getJobDescription(),
-                jobPosting.getRequirements(),
+                charLimit, targetMin, charLimit,
+                jobRoleDirective,
                 experienceSummary
             );
     }
 
     public String buildForQuestion(JobPosting jobPosting, List<UserExperience> experiences,
                                     EssayQuestion question) {
-        String experienceSummary = experiences.stream()
-            .map(this::formatExperience)
-            .collect(Collectors.joining("\n\n"));
+        UserExperience primary = experiences == null || experiences.isEmpty() ? null : experiences.get(0);
+        List<UserExperience> secondary = experiences == null || experiences.size() <= 1
+            ? List.of()
+            : experiences.subList(1, experiences.size());
+        return buildForQuestion(jobPosting, primary, secondary, question);
+    }
 
-        String tone = resolveTone(jobPosting.getCompanyType());
+    public String buildForQuestion(JobPosting jobPosting, UserExperience primary,
+                                    List<UserExperience> secondary, EssayQuestion question) {
+        return buildForQuestion(jobPosting, primary, secondary, question, null);
+    }
+
+    public String buildForQuestion(JobPosting jobPosting, UserExperience primary,
+                                    List<UserExperience> secondary, EssayQuestion question,
+                                    String masterPlan) {
+        String experienceSummary = formatQuestionExperiences(primary, secondary);
+
+        List<UserExperience> allExperiences = new java.util.ArrayList<>();
+        if (primary != null) allExperiences.add(primary);
+        if (secondary != null) allExperiences.addAll(secondary);
+
         String questionType = classifyQuestionType(question.questionText());
         String typeGuide = getTypeGuide(questionType);
-        String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
         String questionGuide = buildQuestionGuide(jobPosting, question);
+        String masterPlanSection = buildMasterPlanSection(masterPlan, question.number());
+        String jobRoleDirective = buildJobRoleDirective(jobPosting, allExperiences);
         int charLimit = question.charLimit() > 0 ? question.charLimit() : 1000;
         int targetMin = (int) (charLimit * 0.9);
 
         return """
-            아래 채용공고의 자소서 문항에 대한 답변을 작성하세요.
-            이 회사에만 쓸 수 있는 답변이어야 합니다. 회사명을 바꾸면 맞지 않는 수준으로 쓰세요.
+            아래 자소서 문항에 대한 답변을 작성하세요.
 
-            [최우선 규칙]
-            순수 텍스트만 출력. 마크다운, 소제목, 번호, 불릿 전부 금지.
-            단락 사이 빈 줄 하나로 구분. 자소서 본문만 출력.
-            반드시 %d자 이내로 작성하세요. (공백 포함, 초과 시 탈락)
-            목표 범위: %d자 ~ %d자.
-            인사팀(비개발자)이 읽는다는 점을 항상 기억하세요.
-
-            [기술 블로그 스타일 금지 — 위반 시 탈락]
-            이 글의 독자는 인사팀입니다. 개발자가 아닙니다.
-            - 기술 용어 3개 이상을 맥락 없이 나열하면 탈락입니다.
-            - 기술 이야기가 전체의 70%%를 넘으면 감점입니다.
-            - 모든 기술 언급에는 반드시 "왜 그 기술을 선택했는가" + "비즈니스 임팩트"가 동반되어야 합니다.
-            - 나쁜 예: "JPA N+1 문제를 해결하고 QueryDSL로 동적 쿼리를 최적화했습니다"
-            - 좋은 예: "주문 조회 API의 응답시간을 2.3초에서 0.4초로 줄여, 사용자 이탈률을 15%% 낮췄습니다"
-
+            [글자수 규칙]
+            반드시 %d자 이내. 목표 범위: %d자 ~ %d자.
+            %s
             [문항 %d번]
             %s
-
-            [기업 분석 — 반드시 답변에 반영할 것]
             %s
-
             [이 문항 전용 작성 가이드]
             %s
 
             [문항 유형: %s]
             %s
 
-            [기승전결 서사 구조 — 이 문항에 맞게 적용]
-            기(起): 문항의 핵심 주제와 연결되는 강렬한 첫 문장. 이 회사의 구체적 특성을 짚으며 시작하세요.
-            승(承): 관련 경험 서술. 구체적 상황 → 문제 파악 → 해결 방법과 이유 → 실행 → 정량적 결과. 기술보다 의사결정 과정과 비즈니스 임팩트를 중심으로.
-            전(轉) **(가장 중요)**: 왜 이 경험이 이 회사에서 중요한지. 기업 분석의 businessChallenges, competitiveAdvantage, techDirection을 직접 인용하여 내 역량과의 접점을 보여주세요. 회사 제품/서비스 고유명사 필수.
-            결(結): 이 회사에서 구체적으로 무엇을 하겠는지. 첫 3개월 액션 플랜.
-            (글자수에 따라 단락 비중을 조절하되, 전(轉)에 가장 많은 비중을 두세요)
-
-            [충성도 표현 — 자연스럽게 녹이세요]
-            - 이 회사의 제품/서비스/기술을 직접 경험한 이야기를 포함하세요.
-            - 경쟁사가 아닌 이 회사를 선택한 구체적 이유가 드러나야 합니다.
-            - 회사의 최근 행보나 기술 방향에 대한 구체적 언급을 포함하세요.
-
-            [HR 평가 포인트 — 이 문항에서 보여줄 것]
-            - 직무적합성: 이 직무를 수행할 구체적 역량과 경험이 보이는가?
-            - 조직적합성: 이 회사의 문화와 가치관에 맞는 사람인가?
-            - 성장가능성: 장기적으로 이 회사에서 성장하고 싶은 진정성이 있는가?
-            - 기술 나열이 아니라 '왜 그 기술을 선택했는가'의 판단 과정을 보여주세요.
-            - 인사팀은 '이 사람과 함께 일하고 싶은가?'를 봅니다.
-
-            [키워드 전략]
-            - 행동동사 중심: "설계했습니다", "주도했습니다", "구축했습니다"
-            - 수동적 표현 금지: "~하게 되었습니다", "~할 수 있었습니다", "~에 참여했습니다"
-            - 채용공고에 나온 기술/역량 키워드를 답변에 자연스럽게 포함하세요.
-            - 숫자와 고유명사를 반드시 포함하세요.
-
-            [금지 표현]
-            "의미 있다고 생각합니다" / "깊이 있는 이해" / "~에 기여하겠습니다"
-            "~를 극대화하겠습니다" / "이러한 경험은 ~에 활용될 수 있습니다"
-            "~의 중요성을 깨달았습니다" / "더 나아가" / "무엇보다"
-            "소중한 경험" / "값진 교훈" / "뜻깊은 시간"
-            같은 어미(~했습니다) 3회 연속 사용
-
-            [AI 판별 회피]
-            - 문장 리듬 변주: 짧은 문장과 긴 문장을 섞으세요.
-            - 구어체 전환어를 1~2회 자연스럽게 사용하세요: "솔직히", "돌이켜보면" 등.
-            - 같은 어미가 반복되지 않도록 변주하세요.
-
-            %s
-
-            [톤]
-            %s
-
-            [채용공고]
-            회사: %s
-            직무설명: %s
-            자격요건: %s
+            [기승전결 서사 구조]
+            기(起): 문항 핵심 주제와 연결되는 강렬한 첫 문장. 이 회사의 구체적 특성을 짚으며 시작.
+            승(承): 관련 경험 서술. 상황→문제→해결방법과 이유→실행→정량적 결과. 의사결정 과정과 비즈니스 임팩트 중심.
+            전(轉) **(합격을 결정하는 단락)**: 회사의 사업 과제를 명시하고 내 경험이 직접 풀 수 있음을 증명. 회사 고유명사를 내 경험과 엮어 사용.
+            결(結): 첫 3개월 구체적 액션 플랜. (전(轉)에 가장 많은 비중)
 
             [지원자 경험]
             %s""".formatted(
-                charLimit,
-                targetMin,
-                charLimit,
+                charLimit, targetMin, charLimit,
+                jobRoleDirective,
                 question.number(),
                 question.questionText(),
-                companyAnalysis,
+                masterPlanSection,
                 questionGuide.isBlank() ? "(분석 데이터 없음 — 채용공고에서 직접 파악하세요)" : questionGuide,
                 questionType,
                 typeGuide,
-                EXPERIENCE_GROUNDING_RULES,
-                tone,
-                jobPosting.getCompanyName(),
-                jobPosting.getJobDescription(),
-                jobPosting.getRequirements(),
                 experienceSummary
             );
     }
@@ -271,12 +170,28 @@ public class CoverLetterPromptBuilder {
                                            String reviewFeedbackJson, int iterationNum,
                                            String targetedStrategy, int charLimit,
                                            String userMessage) {
-        String experienceSummary = experiences.stream()
-            .map(this::formatExperience)
-            .collect(Collectors.joining("\n\n"));
+        UserExperience primary = experiences == null || experiences.isEmpty() ? null : experiences.get(0);
+        List<UserExperience> secondary = experiences == null || experiences.size() <= 1
+            ? List.of()
+            : experiences.subList(1, experiences.size());
+        return buildImprovementPrompt(
+            jobPosting, primary, secondary, question, previousDraft, reviewFeedbackJson,
+            iterationNum, targetedStrategy, charLimit, userMessage
+        );
+    }
 
-        String tone = resolveTone(jobPosting.getCompanyType());
-        String companyAnalysis = buildCompanyAnalysisGuide(jobPosting);
+    public String buildImprovementPrompt(JobPosting jobPosting, UserExperience primary,
+                                           List<UserExperience> secondary, String question, String previousDraft,
+                                           String reviewFeedbackJson, int iterationNum,
+                                           String targetedStrategy, int charLimit,
+                                           String userMessage) {
+        String experienceSummary = formatQuestionExperiences(primary, secondary);
+
+        List<UserExperience> allExperiences = new java.util.ArrayList<>();
+        if (primary != null) allExperiences.add(primary);
+        if (secondary != null) allExperiences.addAll(secondary);
+
+        String jobRoleDirective = buildJobRoleDirective(jobPosting, allExperiences);
 
         String userMessageSection = "";
         if (userMessage != null && !userMessage.isBlank()) {
@@ -316,7 +231,7 @@ public class CoverLetterPromptBuilder {
             반드시 %d자 이내로 작성하세요. (공백 포함, 초과 절대 금지)
             %s
             %s
-
+            %s
             [검토 피드백 (채용팀장)]
             %s
 
@@ -326,35 +241,17 @@ public class CoverLetterPromptBuilder {
             [자소서 문항]
             %s
 
-            [기업 분석]
-            %s
-
-            [톤]
-            %s
-
-            [채용공고]
-            회사: %s
-            직무설명: %s
-            자격요건: %s
-
-            %s
-
             [지원자 경험]
             %s
 
-            위 피드백을 모두 반영하여 개선된 자소서를 작성하세요. 자소서 본문만 출력하세요.""".formatted(
+            위 피드백을 모두 반영하여 개선된 자소서를 작성하세요. 주력 경험을 중심으로 유지하되, 피드백에 따라 서술을 개선하세요. 자소서 본문만 출력하세요.""".formatted(
                 charLimit,
                 userMessageSection,
                 improvementSection,
+                jobRoleDirective,
                 reviewFeedbackJson,
                 previousDraft,
                 question != null ? question : "(단일 자소서)",
-                companyAnalysis,
-                tone,
-                jobPosting.getCompanyName(),
-                jobPosting.getJobDescription() != null ? jobPosting.getJobDescription() : "",
-                jobPosting.getRequirements() != null ? jobPosting.getRequirements() : "",
-                EXPERIENCE_GROUNDING_RULES,
                 experienceSummary
             );
     }
@@ -414,6 +311,89 @@ public class CoverLetterPromptBuilder {
         }
 
         return guide.toString();
+    }
+
+    private String buildMasterPlanSection(String masterPlanJson, int questionNumber) {
+        if (masterPlanJson == null || masterPlanJson.isBlank()) return "";
+
+        try {
+            // markdown fence 제거 + 관용 파싱 (AI 생성 JSON의 trailing comma 등 허용)
+            String cleaned = masterPlanJson.strip();
+            if (cleaned.startsWith("```")) {
+                cleaned = cleaned.replaceFirst("```(?:json)?\\s*", "");
+                cleaned = cleaned.replaceFirst("\\s*```$", "");
+            }
+            JsonNode plan = LENIENT_MAPPER.readTree(cleaned);
+            StringBuilder sb = new StringBuilder();
+            sb.append("\n[전체 자소서 전략 — 반드시 따를 것]\n");
+
+            // 서사 테마
+            String theme = plan.path("narrativeTheme").asText("");
+            if (!theme.isBlank()) {
+                sb.append("서사 테마: ").append(theme).append("\n");
+            }
+
+            // 어필 포인트
+            JsonNode appealPoints = plan.path("appealPoints");
+            if (appealPoints.isArray() && !appealPoints.isEmpty()) {
+                sb.append("어필 포인트: ");
+                for (int i = 0; i < appealPoints.size(); i++) {
+                    if (i > 0) sb.append(" / ");
+                    sb.append(appealPoints.get(i).asText());
+                }
+                sb.append("\n");
+            }
+
+            // 직무 분석
+            JsonNode jobAnalysis = plan.path("jobAnalysis");
+            if (!jobAnalysis.isMissingNode()) {
+                String jobEssence = jobAnalysis.path("jobEssence").asText("");
+                if (!jobEssence.isBlank()) {
+                    sb.append("직무 본질: ").append(jobEssence).append("\n");
+                }
+                String hidden = jobAnalysis.path("hiddenExpectations").asText("");
+                if (!hidden.isBlank()) {
+                    sb.append("숨은 기대: ").append(hidden).append("\n");
+                }
+            }
+
+            // 회피 사항
+            JsonNode avoidances = plan.path("avoidances");
+            if (avoidances.isArray() && !avoidances.isEmpty()) {
+                sb.append("전체 회피사항: ");
+                for (int i = 0; i < avoidances.size(); i++) {
+                    if (i > 0) sb.append(" / ");
+                    sb.append(avoidances.get(i).asText());
+                }
+                sb.append("\n");
+            }
+
+            // 이 문항의 전략
+            JsonNode strategies = plan.path("questionStrategies");
+            if (strategies.isArray()) {
+                for (JsonNode qs : strategies) {
+                    if (qs.path("questionIndex").asInt(0) == questionNumber) {
+                        sb.append("\n[이 문항(").append(questionNumber).append("번)의 전략]\n");
+                        String role = qs.path("roleInNarrative").asText("");
+                        if (!role.isBlank()) sb.append("서사 내 역할: ").append(role).append("\n");
+                        String angle = qs.path("primaryAngle").asText("");
+                        if (!angle.isBlank()) sb.append("경험 서술 각도: ").append(angle).append("\n");
+                        String keyMsg = qs.path("keyMessage").asText("");
+                        if (!keyMsg.isBlank()) sb.append("핵심 메시지: ").append(keyMsg).append("\n");
+                        String connection = qs.path("connectionToNext").asText("");
+                        if (!connection.isBlank()) sb.append("다음 문항 연결: ").append(connection).append("\n");
+                        break;
+                    }
+                }
+            }
+
+            sb.append("\n");
+            return sb.toString();
+
+        } catch (Exception e) {
+            log.debug("masterPlan 파싱 실패: {}", e.getMessage());
+            return "";
+        }
     }
 
     /**
@@ -682,6 +662,35 @@ public class CoverLetterPromptBuilder {
         };
     }
 
+    /**
+     * 경험 목록을 주력/보조로 구분하여 포맷합니다.
+     * 첫 번째 경험 = 주력, 나머지 = 보조.
+     */
+    private String formatQuestionExperiences(UserExperience primary, List<UserExperience> secondary) {
+        if (primary == null && (secondary == null || secondary.isEmpty())) {
+            return "(등록된 경험 없음)";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        if (primary != null) {
+            sb.append("[이 문항의 주력 경험 — 승(承) 단락에서 이 경험을 깊이 있게 서술하세요]\n");
+            sb.append(formatExperience(primary));
+        }
+
+        if (secondary != null && !secondary.isEmpty()) {
+            if (!sb.isEmpty()) {
+                sb.append("\n\n");
+            }
+            sb.append("[보조 경험 — 필요 시 간접적으로 언급할 수 있지만, 주력 경험이 중심이어야 합니다]");
+            for (int i = 0; i < secondary.size(); i++) {
+                sb.append("\n").append(formatExperience(secondary.get(i)));
+                if (i < secondary.size() - 1) sb.append("\n");
+            }
+        }
+
+        return sb.toString();
+    }
+
     private String formatExperience(UserExperience e) {
         StringBuilder sb = new StringBuilder();
         sb.append("[%s] %s (%s)\n%s".formatted(
@@ -691,6 +700,76 @@ public class CoverLetterPromptBuilder {
             sb.append("\n기술스택: ").append(e.getSkills());
         }
         return sb.toString();
+    }
+
+    /**
+     * 직무 설명이 빈약할 때, 지원자 경험에서 기술스택을 추출하여 직무 정합성 지시문을 생성합니다.
+     * 프롬프트 상단([최우선 규칙] 바로 뒤)에 삽입되어 AI가 올바른 직무로 작성하도록 강제합니다.
+     */
+    private String buildJobRoleDirective(JobPosting jobPosting, List<UserExperience> experiences) {
+        String jd = jobPosting.getJobDescription();
+        if (jd != null && jd.length() >= 100) return "";
+        if (experiences == null || experiences.isEmpty()) return "";
+
+        Set<String> skills = new LinkedHashSet<>();
+        for (UserExperience exp : experiences) {
+            if (exp.getSkills() != null && !exp.getSkills().isBlank()) {
+                for (String skill : exp.getSkills().split("[,/·]+")) {
+                    String trimmed = skill.trim();
+                    if (!trimmed.isBlank() && trimmed.length() >= 2) {
+                        skills.add(trimmed);
+                    }
+                }
+            }
+        }
+        if (skills.isEmpty()) return "";
+
+        String skillList = skills.stream().limit(12).collect(Collectors.joining(", "));
+        String inferredRole = inferRole(skills);
+
+        return """
+
+            [직무 정합성 — 위반 시 즉시 탈락]
+            채용공고의 직무 설명이 매우 제한적입니다.
+            지원자 보유 기술: %s
+            추정 직무 분야: %s
+            반드시 위 기술스택과 직무 분야에 맞는 자소서를 작성하세요.
+            지원자 경험과 무관한 직무(예: %s)로 작성하면 즉시 탈락입니다.
+            """.formatted(skillList, inferredRole, getIrrelevantRoles(inferredRole));
+    }
+
+    private String inferRole(Set<String> skills) {
+        String combined = String.join(" ", skills).toLowerCase();
+
+        int backend = countMatches(combined, "spring", "jpa", "querydsl", "mybatis",
+            "hibernate", "jdbc", "java", "kotlin", "서버", "backend", "백엔드",
+            "mysql", "postgresql", "redis", "kafka", "rest", "api", "msa", "jdk");
+        int frontend = countMatches(combined, "react", "vue", "angular", "javascript",
+            "typescript", "프론트", "frontend", "css", "html", "next", "nuxt", "svelte");
+        int data = countMatches(combined, "python", "데이터", "머신러닝", "ml",
+            "tensorflow", "pytorch", "pandas", "spark", "airflow");
+
+        if (backend >= frontend && backend >= data) return "백엔드 개발";
+        if (frontend > backend && frontend >= data) return "프론트엔드 개발";
+        if (data > backend && data > frontend) return "데이터/ML 엔지니어링";
+        return "소프트웨어 개발";
+    }
+
+    private int countMatches(String text, String... keywords) {
+        int count = 0;
+        for (String kw : keywords) {
+            if (text.contains(kw)) count++;
+        }
+        return count;
+    }
+
+    private String getIrrelevantRoles(String inferredRole) {
+        return switch (inferredRole) {
+            case "백엔드 개발" -> "프론트엔드, 디자인, 기획, 데이터분석";
+            case "프론트엔드 개발" -> "백엔드, 인프라, 데이터분석, 기획";
+            case "데이터/ML 엔지니어링" -> "프론트엔드, 디자인, 기획";
+            default -> "지원자 기술스택과 무관한 분야";
+        };
     }
 
     private String resolveTone(CompanyType companyType) {
