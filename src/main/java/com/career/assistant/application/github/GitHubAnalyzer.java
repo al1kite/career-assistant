@@ -137,7 +137,9 @@ public class GitHubAnalyzer {
         LocalDateTime lastCommitAt = null;
 
         for (GitHubCommit commit : commits) {
-            String message = commit.getMessage().toLowerCase();
+            String raw = commit.getMessage();
+            if (raw == null || raw.isBlank()) continue;
+            String message = raw.toLowerCase();
 
             // Skip deploy commits
             if (message.startsWith("chore: deploy") || message.startsWith("chore:deploy")) {
@@ -187,8 +189,12 @@ public class GitHubAnalyzer {
             if (topics.isEmpty()) {
                 // Fallback: extract topic from commit message
                 String message = commit.getMessage();
-                String firstLine = message.split("\n")[0].trim();
-                topics.add(firstLine.length() > 50 ? firstLine.substring(0, 50) : firstLine);
+                if (message != null && !message.isBlank()) {
+                    String firstLine = message.split("\n")[0].trim();
+                    topics.add(firstLine.length() > 50 ? firstLine.substring(0, 50) : firstLine);
+                } else {
+                    topics.add("기타");
+                }
             }
 
             for (String topic : topics) {

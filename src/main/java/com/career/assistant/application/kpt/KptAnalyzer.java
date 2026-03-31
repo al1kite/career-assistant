@@ -120,7 +120,9 @@ public class KptAnalyzer {
 
         sb.append("[").append(label).append("]\n");
         for (GitHubCommit commit : commits) {
-            String firstLine = commit.getMessage().split("\n")[0];
+            String message = commit.getMessage();
+            if (message == null || message.isBlank()) continue;
+            String firstLine = message.split("\n")[0];
             sb.append("- ").append(firstLine).append("\n");
         }
         sb.append("\n");
