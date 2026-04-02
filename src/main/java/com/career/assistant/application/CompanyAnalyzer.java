@@ -332,7 +332,7 @@ public class CompanyAnalyzer {
                 {
                   "questionIndex": 1,
                   "questionText": "문항 원문",
-                  "questionType": "지원동기/핵심역량/문제해결/협업리더십/입사후포부/성장과정/일반 중 하나",
+                  "questionType": "포트폴리오/지원동기/핵심역량/문제해결/협업리더십/입사후포부/성장과정/장단점/일반 중 하나",
                   "writingStrategy": "이 문항에서 어떤 경험을 어떤 구조로 풀어야 하는지 구체적 전략. 3~5문장으로 상세히.",
                   "mustInclude": ["반드시 포함할 키워드나 포인트 (회사 고유명사 1개 이상 필수)"],
                   "avoid": ["피해야 할 표현이나 접근"],

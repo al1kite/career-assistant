@@ -666,6 +666,9 @@ public class CoverLetterFacade {
 
     private String classifyForRetrieval(String questionText) {
         String q = questionText.toLowerCase();
+        if (q.contains("포트폴리오") || q.contains("github") || q.contains("깃허브")
+            || q.contains("블로그") || q.contains("url") || q.contains("링크")
+            || q.contains("첨부") || q.contains("파일") || q.contains("노션")) return "포트폴리오";
         if (q.contains("지원동기") || q.contains("지원 동기")
             || (q.contains("왜") && q.contains("회사"))
             || (q.contains("선택") && q.contains("이유"))
@@ -678,18 +681,22 @@ public class CoverLetterFacade {
             || q.contains("갈등") || q.contains("설득") || q.contains("커뮤니케이션") || q.contains("조직")) return "협업리더십";
         if ((q.contains("입사") && q.contains("후")) || q.contains("포부") || q.contains("계획")
             || q.contains("비전") || q.contains("목표") || q.contains("각오")) return "입사후포부";
+        if (q.contains("장단점") || q.contains("장점과 단점") || q.contains("장점") && q.contains("단점")
+            || q.contains("약점") || q.contains("보완")) return "장단점";
         if (q.contains("성장") || q.contains("가치") || q.contains("인생") || q.contains("신념")
-            || q.contains("좌우명") || q.contains("성격") || q.contains("장단점") || q.contains("본인 소개")) return "성장과정";
+            || q.contains("좌우명") || q.contains("성격") || q.contains("본인 소개")) return "성장과정";
         return "일반";
     }
 
     private String retrievalKeywords(String questionText) {
         return switch (classifyForRetrieval(questionText)) {
+            case "포트폴리오" -> "프로젝트 포트폴리오 GitHub 블로그";
             case "지원동기" -> "동기 관심 계기 선택 이유";
             case "핵심역량" -> "역량 기술 성과 전문성";
             case "문제해결" -> "문제 해결 도전 극복 장애";
             case "협업리더십" -> "협업 팀 리더 소통 갈등 조율";
             case "입사후포부" -> "목표 계획 비전 성장 기여";
+            case "장단점" -> "장점 단점 강점 약점 보완 개선";
             case "성장과정" -> "가치관 경험 전환점 성장";
             default -> "";
         };
