@@ -193,6 +193,12 @@ public class CoverLetterFacade {
             // employmentId가 지정된 경우 → 해당 직무로 다시 크롤링/생성
             if (employmentId != null) {
                 log.info("employmentId={} 지정 — 해당 직무로 재생성: {}", employmentId, url);
+                List<CoverLetter> existingLetters = coverLetterRepository.findByJobPostingId(existing.getId());
+                if (!existingLetters.isEmpty()) {
+                    log.info("기존 자소서 {}건 삭제 후 재생성: jobPostingId={}",
+                        existingLetters.size(), existing.getId());
+                    coverLetterRepository.deleteAll(existingLetters);
+                }
                 return crawlAndGenerate(existing, employmentId);
             }
 
