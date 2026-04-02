@@ -181,14 +181,25 @@ public class CoverLetterFacade {
 
     @Transactional
     public List<CoverLetter> generateFromUrl(String url) {
+        return generateFromUrl(url, null);
+    }
+
+    @Transactional
+    public List<CoverLetter> generateFromUrl(String url, Integer employmentId) {
         if (jobPostingRepository.existsByUrl(url)) {
             log.info("이미 처리된 공고: {}", url);
             JobPosting existing = jobPostingRepository.findByUrl(url).orElseThrow();
 
+            // employmentId가 지정된 경우 → 해당 직무로 다시 크롤링/생성
+            if (employmentId != null) {
+                log.info("employmentId={} 지정 — 해당 직무로 재생성: {}", employmentId, url);
+                return crawlAndGenerate(existing, employmentId);
+            }
+
             // 자동수집으로 FETCHED 상태인 공고 → 크롤링/분석부터 다시 수행
             if (existing.needsCrawling()) {
                 log.info("수집만 된 공고 — 크롤링/분석 시작: {}", url);
-                return crawlAndGenerate(existing);
+                return crawlAndGenerate(existing, null);
             }
 
             List<CoverLetter> existingLetters = coverLetterRepository.findByJobPostingId(existing.getId());
@@ -201,30 +212,49 @@ public class CoverLetterFacade {
         JobPosting jobPosting = JobPosting.from(url);
         jobPostingRepository.save(jobPosting);
 
-        return crawlAndGenerate(jobPosting);
+        return crawlAndGenerate(jobPosting, employmentId);
     }
 
     private List<CoverLetter> crawlAndGenerate(JobPosting jobPosting) {
+        return crawlAndGenerate(jobPosting, null);
+    }
+
+    private List<CoverLetter> crawlAndGenerate(JobPosting jobPosting, Integer employmentId) {
         try {
             // 1단계: 크롤링
             CrawledJobInfo crawledInfo = jsoupCrawler.crawl(jobPosting.getUrl());
 
-            // 1-1단계: 다중 직무 공고 자동 매칭
+            // 1-1단계: 다중 직무 공고 — 사용자 선택 우선, 자동 매칭 폴백
             if (crawledInfo.employmentOptions().size() > 1) {
-                List<UserExperience> experiences = userExperienceRepository.findAll();
-                EmploymentOption best = findBestEmployment(crawledInfo.employmentOptions(), experiences);
+                EmploymentOption best;
+                if (employmentId != null) {
+                    // 사용자가 직접 선택한 employment 사용
+                    best = crawledInfo.employmentOptions().stream()
+                        .filter(o -> o.id() == employmentId)
+                        .findFirst()
+                        .orElse(null);
+                    if (best != null) {
+                        log.info("[매칭] 사용자 직접 선택 직무: {} (id={})", best.field(), best.id());
+                    } else {
+                        log.warn("[매칭] 사용자 지정 employmentId={} 를 찾을 수 없음 — 자동 매칭 폴백", employmentId);
+                        List<UserExperience> experiences = userExperienceRepository.findAll();
+                        best = findBestEmployment(crawledInfo.employmentOptions(), experiences);
+                    }
+                } else {
+                    // 기존 자동 매칭
+                    List<UserExperience> experiences = userExperienceRepository.findAll();
+                    best = findBestEmployment(crawledInfo.employmentOptions(), experiences);
+                }
                 if (best != null && best.id() != crawledInfo.employmentOptions().get(0).id()) {
                     log.info("[매칭] 사용자 경험 기반 직무 자동 선택: {} (id={}) ← 기본: {} (id={})",
                         best.field(), best.id(),
                         crawledInfo.employmentOptions().get(0).field(),
                         crawledInfo.employmentOptions().get(0).id());
                     try {
-                        CrawledJobInfo refined = jsoupCrawler.fetchForEmployment(
-                            jobPosting.getUrl(), best.id());
+                        CrawledJobInfo refined = jsoupCrawler.fetchForEmployment(best.id());
                         crawledInfo = CrawledJobInfo.of(
                             crawledInfo.companyName(),
-                            refined.jobDescription().isBlank()
-                                ? crawledInfo.jobDescription() : refined.jobDescription(),
+                            mergeJobDescriptions(crawledInfo.jobDescription(), refined.jobDescription()),
                             crawledInfo.requirements(),
                             crawledInfo.deadline(),
                             crawledInfo.active(),
@@ -233,7 +263,17 @@ public class CoverLetterFacade {
                             crawledInfo.employmentOptions()
                         );
                     } catch (Exception e) {
-                        log.warn("[매칭] 선택된 employment 재조회 실패 — 기본 직무로 진행: {}", e.getMessage());
+                        log.warn("[매칭] 선택된 employment 재조회 실패 — employment 옵션 정보로 보강: {}", e.getMessage());
+                        String fallbackJd = buildFallbackEmploymentJd(best);
+                        crawledInfo = CrawledJobInfo.of(
+                            crawledInfo.companyName(),
+                            mergeJobDescriptions(crawledInfo.jobDescription(), fallbackJd),
+                            crawledInfo.requirements(),
+                            crawledInfo.deadline(),
+                            crawledInfo.active(),
+                            crawledInfo.essayQuestions(),
+                            crawledInfo.employmentOptions()
+                        );
                     }
                 } else if (best != null) {
                     log.info("[매칭] 기본 선택 직무가 최적: {} (id={})", best.field(), best.id());
@@ -748,6 +788,42 @@ public class CoverLetterFacade {
             if (text.contains(kw)) count++;
         }
         return count;
+    }
+
+    /**
+     * 원본 JD에서 회사 정보를 보존하고, employment 관련 섹션만 교체합니다.
+     * 원본 JD 구조: [회사 소개]...[업종]...[홈페이지]...[직무 분야]...[포지션]...
+     * → [직무 분야] 이전까지를 회사 정보로 보존하고, 이후를 refined로 교체합니다.
+     */
+    private String mergeJobDescriptions(String originalJd, String refinedEmploymentJd) {
+        if (refinedEmploymentJd == null || refinedEmploymentJd.isBlank()) return originalJd;
+        if (originalJd == null || originalJd.isBlank()) return refinedEmploymentJd;
+
+        Set<String> employmentTags = Set.of("[직무 분야]", "[포지션]", "[부서]", "[경력 구분]", "[채용 설명]");
+
+        StringBuilder companyInfo = new StringBuilder();
+        for (String line : originalJd.split("\n")) {
+            if (employmentTags.stream().anyMatch(line.trim()::startsWith)) break;
+            companyInfo.append(line).append("\n");
+        }
+
+        String company = companyInfo.toString().stripTrailing();
+        if (company.isBlank()) return refinedEmploymentJd;
+        return company + "\n\n" + refinedEmploymentJd;
+    }
+
+    /**
+     * fetchForEmployment 실패 시, EmploymentOption 기본 정보로 최소한의 JD를 구성합니다.
+     */
+    private String buildFallbackEmploymentJd(EmploymentOption option) {
+        StringBuilder sb = new StringBuilder();
+        if (option.field() != null && !option.field().isBlank())
+            sb.append("[직무 분야] ").append(option.field()).append("\n");
+        if (option.title() != null && !option.title().isBlank())
+            sb.append("[포지션] ").append(option.title()).append("\n");
+        if (option.department() != null && !option.department().isBlank())
+            sb.append("[부서] ").append(option.department()).append("\n");
+        return sb.toString();
     }
 
     private LocalDate parseDeadline(String deadline) {
