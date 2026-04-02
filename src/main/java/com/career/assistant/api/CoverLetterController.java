@@ -75,7 +75,7 @@ public class CoverLetterController {
     @PostMapping
     public ResponseEntity<?> generate(@Valid @RequestBody GenerateCoverLetterRequest request) {
         try {
-            var coverLetters = coverLetterFacade.generateFromUrl(request.url());
+            var coverLetters = coverLetterFacade.generateFromUrl(request.url(), request.employmentId());
             List<CoverLetterResponse> responses = coverLetters.stream()
                 .map(CoverLetterResponse::from)
                 .toList();

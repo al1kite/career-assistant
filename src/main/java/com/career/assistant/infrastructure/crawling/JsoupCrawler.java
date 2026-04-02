@@ -415,7 +415,7 @@ public class JsoupCrawler {
      * 특정 employment ID의 상세 정보를 인증 API로 재조회합니다.
      * 해당 employment의 field/title/department + 자소서 문항을 반환합니다.
      */
-    public CrawledJobInfo fetchForEmployment(String url, int employmentId) {
+    public CrawledJobInfo fetchForEmployment(int employmentId) {
         log.info("자소설닷컴 employment 재조회 — employment_id={}", employmentId);
 
         if (jasoseolUserToken == null || jasoseolUserToken.isBlank()) {
@@ -470,21 +470,10 @@ public class JsoupCrawler {
                 }
             }
 
-            // 기존 크롤링 결과에서 회사명/마감일을 가져오기 위해 원본 URL 재크롤링
-            Document doc = Jsoup.connect(url)
-                .userAgent(USER_AGENT)
-                .timeout(10_000)
-                .get();
-
-            String companyName = doc.select("meta[property=og:title]").attr("content");
-            companyName = parseCompanyNameFromTitle(companyName);
-            if (companyName.isBlank()) {
-                companyName = doc.title();
-            }
-
             log.info("자소설닷컴 employment 재조회 성공 — field={}, 문항={}개", empField, questions.size());
 
-            return CrawledJobInfo.of(companyName, jobDesc.toString(), "", null, true, questions);
+            // company name은 caller(CoverLetterFacade)가 이미 보유 — 여기서는 빈 값 반환
+            return CrawledJobInfo.of("", jobDesc.toString(), "", null, true, questions);
 
         } catch (CrawlingException e) {
             throw e;
