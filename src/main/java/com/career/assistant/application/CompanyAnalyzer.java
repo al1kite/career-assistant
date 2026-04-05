@@ -269,7 +269,10 @@ public class CompanyAnalyzer {
               ],
               "companyValues": "회사의 핵심 가치와 조직 문화",
               "techDirection": "현재 기술 방향성과 투자/전환 동향. 구체적 기술명과 이유를 포함",
-              "businessChallenges": "이 회사가 현재 직면한 사업/기술 과제 2~3가지",
+              "painPoints": "이 회사가 지금 가장 고민하는 사업/기술 과제 2~3가지. 자소서에서 '내가 이걸 풀 수 있다'고 연결할 수 있는 구체적 과제를 추출",
+              "hiddenRequirements": "이 회사가 실제로 원하는 핵심 역량 3~5가지. 공고 행간에서 읽어내세요",
+              "idealCandidateProfile": "이 회사의 합격자 페르소나를 추론. 어떤 경험, 어떤 사고방식, 어떤 업무 스타일의 사람인지 3~4문장",
+              "insiderLanguage": "이 회사/업계 현직자들이 자주 쓰는 용어나 표현 5~8개",
               "recentNews": "최근 1~2년간 주요 뉴스, 발표, 인수합병, 신사업 등",
               "recentTrends": "이 회사/업계의 최근 동향과 전략 방향"
             }
@@ -325,7 +328,10 @@ public class CompanyAnalyzer {
               "idealCandidate": "이 포지션의 이상적 지원자 프로필",
               "companyValues": "회사의 핵심 가치와 조직 문화",
               "techDirection": "현재 기술 방향성과 투자/전환 동향. 구체적 기술명과 이유를 포함",
-              "businessChallenges": "이 회사가 현재 직면한 사업/기술 과제 2~3가지",
+              "painPoints": "이 회사가 지금 가장 고민하는 사업/기술 과제 2~3가지. 자소서에서 '내가 이걸 풀 수 있다'고 연결할 수 있는 구체적 과제를 추출",
+              "hiddenRequirements": "우대사항에 숨겨진 진짜 필수 역량. 우대라고 써있지만 실제로는 필수인 것들을 해석하여 3~5가지 나열",
+              "idealCandidateProfile": "이 포지션의 합격자 페르소나를 구체적으로 추론. 어떤 경험을 가진, 어떤 사고방식의, 어떤 업무 스타일의 사람인지 3~4문장",
+              "insiderLanguage": "이 회사/업계 현직자들이 자주 쓰는 용어나 표현 5~8개. 자소서에 이 표현을 녹이면 '우리 팀 동료 같다'는 인상을 줄 수 있음",
               "recentNews": "최근 1~2년간 주요 뉴스, 발표, 인수합병, 신사업 등",
               "recentTrends": "이 회사/업계의 최근 동향과 전략 방향",
               "questionGuides": [
