@@ -344,7 +344,7 @@ public class CoverLetterFacade {
             log.info("[RAG] 검색된 경험 {}건 (단일 자소서)", experiences.size());
 
             String prompt = promptBuilder.build(jobPosting, experiences, 1000);
-            String content = enforceCharLimit(ai.generateWithContext(jobContext, prompt), 1000);
+            String content = enforceCharLimit(ai.generateWithContext(jobContext, prompt), 1000, ai, jobContext);
 
             CoverLetter coverLetter = CoverLetter.of(jobPosting, ai.getModelName(), content);
             coverLetterRepository.save(coverLetter);
@@ -385,7 +385,7 @@ public class CoverLetterFacade {
 
             String prompt = promptBuilder.buildForQuestion(jobPosting, primary, secondary, question, masterPlan);
             int charLimit = question.charLimit() > 0 ? question.charLimit() : 1000;
-            String content = enforceCharLimit(ai.generateWithContext(jobContext, prompt), charLimit);
+            String content = enforceCharLimit(ai.generateWithContext(jobContext, prompt), charLimit, ai, jobContext);
 
             CoverLetter coverLetter = CoverLetter.of(
                 jobPosting, ai.getModelName(), content,
@@ -476,14 +476,15 @@ public class CoverLetterFacade {
             log.info("[에이전트] 개선 프롬프트 생성 → v{} 작성 중...", latest.getVersion() + 1);
             try {
                 String targetedStrategy = buildTargetedStrategy(review);
+                String reviewSummary = buildReviewSummary(review);
                 log.info("[에이전트] 타겟 전략: {}", targetedStrategy.replace("\n", " | "));
                 String improvementPrompt = promptBuilder.buildImprovementPrompt(
-                    jobPosting, experiences, questionText, currentDraft, review.rawJson(), iteration, targetedStrategy,
+                    jobPosting, experiences, questionText, currentDraft, reviewSummary, iteration, targetedStrategy,
                     charLimit, userMessage
                 );
                 String improvedContent = enforceCharLimit(
                     jobContext != null ? ai.generateWithContext(jobContext, improvementPrompt) : ai.generate(improvementPrompt),
-                    charLimit);
+                    charLimit, ai, jobContext);
 
                 // 새 버전 저장
                 CoverLetter newVersion = CoverLetter.ofVersion(
@@ -526,6 +527,43 @@ public class CoverLetterFacade {
         return QUALITY_GRADE.equals(grade) || "S".equals(grade);
     }
 
+    String buildReviewSummary(ReviewResult review) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[채용팀장 피드백]\n");
+
+        if (!review.violations().isEmpty()) {
+            sb.append("치명적 문제:\n");
+            for (String v : review.violations()) {
+                sb.append("- ").append(v).append("\n");
+            }
+        }
+
+        if (!review.improvements().isEmpty()) {
+            sb.append("\n수정 목표:\n");
+            for (String imp : review.improvements()) {
+                sb.append("- ").append(imp).append("\n");
+            }
+        }
+
+        var weakest = review.getWeakestDimensions(2);
+        if (!weakest.isEmpty()) {
+            sb.append("\n최약 항목:\n");
+            for (var dim : weakest) {
+                String field = (String) dim.get("field");
+                String name = (String) dim.get("name");
+                int score = (int) dim.get("score");
+                sb.append("▸ ").append(name).append(" (").append(score).append("점): ")
+                    .append(getFixAdvice(field, score)).append("\n");
+            }
+        }
+
+        if (review.overallComment() != null && !review.overallComment().isBlank()) {
+            sb.append("\n총평: ").append(review.overallComment());
+        }
+
+        return sb.toString();
+    }
+
     String buildTargetedStrategy(ReviewResult review) {
         var weakest = review.getWeakestDimensions(3);
         StringBuilder sb = new StringBuilder();
@@ -545,33 +583,59 @@ public class CoverLetterFacade {
 
     String getFixAdvice(String field, int score) {
         return switch (field) {
-            case "answerRelevance" -> "[기준5] 첫 문장부터 질문 키워드에 직접 응답하세요. 질문이 묻는 것에 정면으로 답하고, 문항 하위 질문을 빠짐없이 다루세요.";
-            case "jobFit" -> "[기준1] 채용공고 자격요건의 기술 키워드를 본인 경험과 직접 연결하세요. 구체적 프로젝트와 성과를 매칭하세요.";
-            case "orgFit" -> "[기준2,8] 회사 분석의 핵심 가치/문화를 구체적으로 언급하세요. 기업 고유명사 2개 이상 필수. 이 회사가 아니면 안 되는 절실함을 보여주세요.";
-            case "specificity" -> "[기준4] '많은 개선'→'응답시간 2.3초→0.4초'로 교체하세요. 숫자, 프로젝트명, KPI를 반드시 포함하세요.";
-            case "authenticity" -> "[기준3,8] 이 지원자만 쓸 수 있는 구체적 장면을 추가하세요. 진부한 표현을 제거하고, 날짜/시간/감정 등 생생한 디테일을 녹이세요.";
-            case "aiDetectionRisk" -> "[기준3] 어미 반복을 깨고, 구어체 전환어('솔직히', '돌이켜보면')를 추가하고, 감정 표현을 넣으세요.";
-            case "logicalStructure" -> "[기준6] 기승전결 순서를 점검하세요. 불필요한 수식어를 삭제하고, 단락 간 논리 연결이 자연스러운지 확인하세요.";
-            case "keywordUsage" -> "[기준1] 채용공고의 핵심 키워드 3~5개를 추출하여 문맥에 맞게 자연스럽게 포함하세요.";
-            case "experienceConsistency" -> "[기준4] 제공된 경험 목록에 없는 프로젝트나 경력을 삭제하세요. 실제 경험만 정확히 인용하세요.";
+            case "answerRelevance" -> "질문이 묻는 것에 정면으로 답하세요. 문항 하위 질문을 빠짐없이 다루세요.";
+            case "jobFit" -> "채용공고 자격요건의 기술 키워드를 본인 경험과 직접 연결하세요. 구체적 프로젝트와 성과를 매칭하세요.";
+            case "orgFit" -> "회사의 Pain Point를 짚고, 내 경험이 그것과 어떻게 맞닿는지 연결하세요. 이 회사가 아니면 안 되는 이유를 보여주세요.";
+            case "specificity" -> "'많은 개선'→'응답시간 2.3초→0.4초'로 교체하세요. 숫자, 프로젝트명, KPI를 반드시 포함하세요.";
+            case "authenticity" -> "이 지원자만 쓸 수 있는 구체적 장면을 추가하세요. 판단 근거('왜 그 선택을 했는지')를 녹이세요.";
+            case "aiDetectionRisk" -> "문장 길이와 어미에 변화를 주세요. 정형화된 구조를 깨고, 사람이 쓴 글의 호흡을 살리세요.";
+            case "logicalStructure" -> "기승전결 순서를 점검하세요. 불필요한 수식어를 삭제하고, 단락 간 논리 연결을 자연스럽게 하세요.";
+            case "keywordUsage" -> "채용공고의 핵심 키워드 3~5개를 문맥에 맞게 자연스럽게 포함하세요.";
+            case "experienceConsistency" -> "제공된 경험 목록에 없는 프로젝트나 경력을 삭제하세요. 실제 경험만 정확히 인용하세요.";
             default -> "해당 항목의 점수를 높이기 위해 구체성과 관련성을 강화하세요.";
         };
     }
 
-    String enforceCharLimit(String content, int charLimit) {
+    String enforceCharLimit(String content, int charLimit, AiPort ai, String jobContext) {
         if (charLimit <= 0 || content == null) return content;
         if (content.length() <= charLimit) return content;
 
-        // 120% 초과 시 문장 단위 트리밍
         double ratio = (double) content.length() / charLimit;
-        if (ratio > 1.2) {
-            log.warn("[글자수] 제한 대비 {}% 초과 ({}/{}자) — 문장 단위 트리밍 적용",
+
+        // 20% 초과: AI 재작성
+        if (ratio > 1.2 && ai != null) {
+            log.warn("[글자수] 제한 대비 {}% 초과 ({}/{}자) — AI 재작성 적용",
                 Math.round((ratio - 1) * 100), content.length(), charLimit);
+            try {
+                String rewritePrompt = """
+                    아래 자소서가 글자수 제한을 초과했습니다.
+                    핵심 메시지와 수치를 모두 유지하면서, 군더더기만 제거하여 %d자 이내로 줄여주세요.
+                    결론 단락은 절대 삭제하지 마세요. 자소서 본문만 출력하세요.
+
+                    [현재 자소서 (%d자)]
+                    %s""".formatted(charLimit, content.length(), content);
+                String rewritten = jobContext != null
+                    ? ai.generateWithContext(jobContext, rewritePrompt)
+                    : ai.generate(rewritePrompt);
+                if (rewritten != null && !rewritten.isBlank() && rewritten.length() <= charLimit) {
+                    log.info("[글자수] AI 재작성 성공: {}자 → {}자 (제한: {}자)",
+                        content.length(), rewritten.length(), charLimit);
+                    return rewritten;
+                }
+                log.warn("[글자수] AI 재작성 결과가 여전히 초과 ({}자) — 문장 트리밍 폴백",
+                    rewritten != null ? rewritten.length() : 0);
+                // AI 재작성 결과가 여전히 초과이면 그 결과에 문장 트리밍 적용
+                if (rewritten != null && !rewritten.isBlank()) {
+                    content = rewritten;
+                }
+            } catch (Exception e) {
+                log.warn("[글자수] AI 재작성 실패 — 문장 트리밍 폴백: {}", e.getMessage());
+            }
         } else {
             log.info("[글자수] 제한 초과 ({}/{}자) — 문장 단위 트리밍 적용", content.length(), charLimit);
         }
 
-        // 문장 단위로 분리하여 charLimit 이내로 자르기
+        // 20% 이내 초과 또는 AI 재작성 폴백: 문장 단위 트리밍
         String[] sentences = content.split("(?<=[.!?。])\\s*");
         StringBuilder trimmed = new StringBuilder();
         for (String sentence : sentences) {
@@ -581,7 +645,6 @@ public class CoverLetterFacade {
             trimmed.append(sentence);
         }
 
-        // 문장 단위로 잘라도 빈 문자열이면 강제 절삭
         if (trimmed.isEmpty()) {
             return content.substring(0, charLimit);
         }
