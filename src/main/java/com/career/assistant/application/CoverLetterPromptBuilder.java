@@ -70,16 +70,25 @@ public class CoverLetterPromptBuilder {
             [글자수 규칙]
             반드시 %d자 이내. 목표 범위: %d자 ~ %d자.
             %s
+            [절대 금지 사항]
+            1. 허위 경험 금지: 제공된 경험 목록에 없는 프로젝트·수상·경력을 지어내지 마세요.
+            2. 범용 문장 금지: 회사명을 바꿔도 그대로 쓸 수 있는 문장은 전부 삭제하고 다시 쓰세요.
+            3. 글자수 준수: 반드시 %d자 이내. 초과 절대 금지.
+
+            [관점 전환]
+            "내가 한 일"이 아닌 "이 회사의 과제를 내가 풀어본 경험"으로 쓰세요.
+
             [기승전결 4단락 구성 — 제목 없이]
-            기(起) (약 150자) — 이 회사의 사업/기술/제품에서 발견한 구체적 포인트로 시작. "지원하게 된 계기는~" 금지.
-            승(承) (약 300자) — 핵심 경험 1개를 깊이 서술. 상황→문제→해결방법과 이유→실행→정량적 결과.
-            전(轉) (약 350자) — 합격을 결정하는 단락. 회사의 사업 과제를 명시하고 내 경험이 직접 풀 수 있음을 증명.
-            결(結) (약 200자) — 첫 3개월 구체적 액션.
+            기(起) (약 150자) — 이 회사의 Pain Point나 사업 과제를 짚으며 시작. "지원하게 된 계기는~" 금지.
+            승(承) (약 300자) — 핵심 경험을 "왜 그 판단을 했는지" 중심으로 서술. "했습니다"의 나열이 아닌 "왜 그랬는지"의 연쇄.
+            전(轉) (약 350자) — 합격을 결정하는 단락. 회사의 Pain Point를 명시하고 내 사고 방식이 그것을 풀 수 있음을 증명.
+            결(結) (약 200자) — 이 회사에서 구체적으로 풀고 싶은 문제 제시. "열심히 하겠습니다"가 아닌 "OO의 XX를 YY 방법으로 개선하겠다" 수준.
 
             [지원자 경험]
             %s""".formatted(
                 charLimit, targetMin, charLimit,
                 jobRoleDirective,
+                charLimit,
                 experienceSummary
             );
     }
@@ -121,6 +130,14 @@ public class CoverLetterPromptBuilder {
             [글자수 규칙]
             반드시 %d자 이내. 목표 범위: %d자 ~ %d자.
             %s
+            [절대 금지 사항]
+            1. 허위 경험 금지: 제공된 경험 목록에 없는 프로젝트·수상·경력을 지어내지 마세요.
+            2. 범용 문장 금지: 회사명을 바꿔도 그대로 쓸 수 있는 문장은 전부 삭제하고 다시 쓰세요.
+            3. 글자수 준수: 반드시 %d자 이내. 초과 절대 금지.
+
+            [관점 전환]
+            "내가 한 일"이 아닌 "이 회사의 과제를 내가 풀어본 경험"으로 쓰세요.
+
             [문항 %d번]
             %s
             %s
@@ -130,16 +147,14 @@ public class CoverLetterPromptBuilder {
             [문항 유형: %s]
             %s
 
-            [기승전결 서사 구조]
-            기(起): 문항 핵심 주제와 연결되는 강렬한 첫 문장. 이 회사의 구체적 특성을 짚으며 시작.
-            승(承): 관련 경험 서술. 상황→문제→해결방법과 이유→실행→정량적 결과. 의사결정 과정과 비즈니스 임팩트 중심.
-            전(轉) **(합격을 결정하는 단락)**: 회사의 사업 과제를 명시하고 내 경험이 직접 풀 수 있음을 증명. 회사 고유명사를 내 경험과 엮어 사용.
-            결(結): 첫 3개월 구체적 액션 플랜. (전(轉)에 가장 많은 비중)
+            [서사 구조 — 기승전결]
+            기(起): 문항 주제를 짚으며 시작. 승(承): 핵심 경험을 "왜 그 판단을 했는지" 중심으로. 전(轉): 회사 Pain Point와 내 사고 방식 연결. 결(結): 문항 유형 가이드의 결(結) 지침을 따르세요.
 
             [지원자 경험]
             %s""".formatted(
                 charLimit, targetMin, charLimit,
                 jobRoleDirective,
+                charLimit,
                 question.number(),
                 question.questionText(),
                 masterPlanSection,
@@ -203,22 +218,16 @@ public class CoverLetterPromptBuilder {
             improvementSection = """
             %s
 
-            [추가 원칙]
+            [개선 원칙]
             1. 잘 쓴 부분은 반드시 유지하거나 더 강화하세요.
-            2. violations에 지적된 문장은 반드시 수정하세요.
-            3. improvements에 제시된 개선 방향과 예시를 적극 참고하세요.
-            4. 기술 용어를 지나치게 나열하지 말고, 의사결정 과정과 협업 맥락을 강조하세요.""".formatted(targetedStrategy);
+            2. 지적된 문제만 고치세요. 괜찮은 부분까지 건드리면 글이 망가집니다.
+            3. 글 전체의 자연스러운 흐름을 유지하세요.""".formatted(targetedStrategy);
         } else {
             improvementSection = """
             [개선 원칙 — %d차 개선]
             1. 잘 쓴 부분은 반드시 유지하거나 더 강화하세요.
-            2. violations에 지적된 문장은 반드시 수정하세요.
-            3. improvements에 제시된 개선 방향과 예시를 적극 참고하세요.
-            4. AI탐지 위험도가 높다면: 추상적 표현을 구체적으로 바꾸고, 어미 반복을 깨고, 감정과 생생한 디테일을 추가하세요.
-            5. 구체성 점수가 낮다면: 숫자, 프로젝트명, KPI, 정량적 성과를 반드시 추가하세요.
-            6. 조직적합도가 낮다면: 이 회사만의 특성, 문화, 기술 방향을 더 구체적으로 언급하세요.
-            7. 키워드 활용이 낮다면: 채용공고의 핵심 키워드를 자연스럽게 녹이세요.
-            8. 기술 용어를 지나치게 나열하지 말고, 의사결정 과정과 협업 맥락을 강조하세요.""".formatted(iterationNum);
+            2. 지적된 문제만 고치세요. 괜찮은 부분까지 건드리면 글이 망가집니다.
+            3. 글 전체의 자연스러운 흐름을 유지하세요.""".formatted(iterationNum);
         }
 
         return """
@@ -232,6 +241,7 @@ public class CoverLetterPromptBuilder {
             %s
             %s
             %s
+            아래는 채용팀장이 정리한 핵심 피드백입니다. 이 피드백에 집중하여 자연스럽게 개선하세요. 체크리스트처럼 하나씩 처리하지 마세요.
             [검토 피드백 (채용팀장)]
             %s
 
@@ -276,7 +286,11 @@ public class CoverLetterPromptBuilder {
                 appendAnalysisField(guide, analysis, "companyValues", "핵심 가치/문화");
                 appendAnalysisField(guide, analysis, "techDirection", "기술 방향성/투자 동향");
                 appendAnalysisField(guide, analysis, "techStack", "기술 스택");
+                appendAnalysisField(guide, analysis, "painPoints", "Pain Points (이 회사가 가장 고민하는 과제)");
                 appendAnalysisField(guide, analysis, "businessChallenges", "현재 사업/기술 과제");
+                appendAnalysisField(guide, analysis, "hiddenRequirements", "숨겨진 필수 역량 (우대사항 이면)");
+                appendAnalysisField(guide, analysis, "idealCandidateProfile", "합격자 페르소나");
+                appendAnalysisField(guide, analysis, "insiderLanguage", "현직자 언어 (자소서에 녹일 표현)");
                 appendAnalysisField(guide, analysis, "recentNews", "최근 주요 뉴스/발표");
                 appendAnalysisField(guide, analysis, "recentTrends", "최근 동향/전략");
 
@@ -500,6 +514,11 @@ public class CoverLetterPromptBuilder {
     private String classifyQuestionType(String questionText) {
         String q = questionText.toLowerCase();
 
+        if (q.contains("포트폴리오") || q.contains("github") || q.contains("깃허브")
+            || q.contains("블로그") || q.contains("url") || q.contains("링크")
+            || q.contains("첨부") || q.contains("파일") || q.contains("노션")) {
+            return "포트폴리오";
+        }
         if (q.contains("지원동기") || q.contains("지원 동기")
             || (q.contains("왜") && q.contains("회사"))
             || (q.contains("선택") && q.contains("이유"))
@@ -522,8 +541,12 @@ public class CoverLetterPromptBuilder {
             || q.contains("비전") || q.contains("목표") || q.contains("각오")) {
             return "입사후포부";
         }
+        if (q.contains("장단점") || q.contains("장점과 단점") || q.contains("장점") && q.contains("단점")
+            || q.contains("약점") || q.contains("보완")) {
+            return "장단점";
+        }
         if (q.contains("성장") || q.contains("가치") || q.contains("인생") || q.contains("신념")
-            || q.contains("좌우명") || q.contains("성격") || q.contains("장단점") || q.contains("본인 소개")) {
+            || q.contains("좌우명") || q.contains("성격") || q.contains("본인 소개")) {
             return "성장과정";
         }
         return "일반";
@@ -531,20 +554,37 @@ public class CoverLetterPromptBuilder {
 
     private String getTypeGuide(String questionType) {
         return switch (questionType) {
+            case "포트폴리오" -> """
+                이 문항은 URL 또는 파일을 제출하는 칸입니다. 에세이를 쓰는 칸이 아닙니다.
+
+                [필수 행동]
+                - GitHub, 블로그, 노션, 개인 사이트 등 본인의 포트폴리오 URL 하나만 출력하세요.
+                - 설명문을 길게 쓰지 마세요. URL만 출력하거나, 시스템이 텍스트를 허용하는 경우에도 1~2문장 이내로 간결하게.
+                - 형식: "포트폴리오: https://..." 또는 URL만 단독 출력.
+
+                [절대 금지]
+                - 이 칸에 자기소개서 형식의 장문을 쓰면 형식 미준수로 감점됩니다.
+                - 선택 문항이라도 형식 실수는 지원서 전체 완성도를 떨어뜨립니다.""";
+
             case "지원동기" -> """
                 이 문항의 핵심: "왜 수많은 회사 중 이 회사여야 하는가?"
 
+                [4단계 연결 — 빠진 단계가 있으면 설득력이 약해집니다]
+                1단계(산업/시장): 이 산업이 왜 중요한지, 시장 흐름에서 본인이 포착한 관점
+                2단계(회사 특징): 그 산업 안에서 이 회사만의 차별점 (제품/기술/전략 고유명사 활용)
+                3단계(직무 연결): 이 회사의 채용 포지션이 회사 전략에서 어떤 역할인지, 왜 이 직무가 매력적인지
+                4단계(내 경험 적합성): 위 3단계와 직접 연결되는 본인의 경험·역량
+
                 [기승전결 적용]
-                기: 이 회사의 사업/기술/제품에서 발견한 구체적 매력 포인트로 시작. 일반적인 업계 이야기 금지.
+                기: 이 회사의 사업/기술/제품에서 발견한 구체적 매력 포인트로 시작. 일반적인 업계 이야기보다 이 회사만의 특성을 짚으세요.
                 승: 그 매력 포인트와 연결되는 본인의 경험. "이 분야에서 이런 문제를 풀어본 나이기에 이 회사의 방향이 와닿는다."
                 전: 경쟁사 대비 이 회사만의 차별점을 짚고, 왜 이 회사의 방향이 본인의 커리어와 맞닿는지 구체화.
                 결: 입사 후 이 회사에서 구체적으로 풀고 싶은 문제. "OO 시스템의 XX를 YY 방법으로 개선하고 싶다" 수준.
 
                 [필수 포함 요소]
                 - 이 회사의 제품/서비스를 직접 써보거나 분석한 경험
-                - 채용공고에서 발견한 구체적 기술 키워드와 본인 경험의 연결
                 - 경쟁사가 아닌 이 회사여야 하는 이유 (구체적 차별점)
-                - 이 회사에서 장기적으로 성장하고 싶다는 진정성 (추상적 다짐이 아닌 구체적 비전)
+                - 채용공고 키워드와 본인 경험의 직접 연결
 
                 [참고 예시 — 기(起) 단락]
                 "XX사에서 결제 지연 이슈를 추적하던 중, YY사 기술블로그의 이벤트 소싱 아키텍처 글을 발견했습니다. 우리 팀이 3주간 헤맨 동시성 문제를, YY사는 CQRS 패턴 하나로 풀어내고 있었습니다. 그날 새벽, 해당 코드를 로컬에 재현하며 확신했습니다. 이 구조를 설계한 팀에서 일해야겠다고."
@@ -561,9 +601,8 @@ public class CoverLetterPromptBuilder {
 
                 [필수 포함 요소]
                 - 정량적 성과 (숫자, 비율, 기간, 규모)
-                - 기술 스택·도구를 문장 안에 자연스럽게 녹인 서술
-                - "나는 잘합니다"가 아닌, 경험 속 행동과 결과로 역량을 증명
-                - 채용공고의 자격요건/우대사항 키워드와의 직접 연결
+                - 경험 속 행동과 결과로 역량을 증명 ("나는 잘합니다" 금지)
+                - 채용공고 자격요건 키워드와의 직접 연결
 
                 [참고 예시 — 기(起) 단락]
                 "XX시스템의 API 응답시간이 평균 2.3초를 넘기던 날, 저는 슬로우 쿼리 로그를 열었습니다. 원인은 N+1 문제가 아니었습니다. 인덱스가 걸려 있지만 카디널리티가 낮아 풀스캔과 다름없는 복합 조건 쿼리 세 개. 실행 계획을 뜯어 커버링 인덱스로 재설계하자, 응답시간이 0.4초로 떨어졌습니다."
@@ -580,8 +619,7 @@ public class CoverLetterPromptBuilder {
 
                 [필수 포함 요소]
                 - 문제 상황의 구체적 맥락 (숫자, 기간, 영향 범위)
-                - 원인 분석 과정 (단순 "어려웠다"가 아닌, 왜 어려웠는지)
-                - 대안 비교와 최종 선택의 논리
+                - 대안 비교와 최종 선택의 논리적 근거
                 - 정량적 결과와 교훈
 
                 [참고 예시 — 기(起) 단락]
@@ -600,8 +638,7 @@ public class CoverLetterPromptBuilder {
                 [필수 포함 요소]
                 - 갈등/충돌의 구체적 맥락 (추상적 "힘들었다" 금지)
                 - 상대방 관점에 대한 이해 표현
-                - 본인의 구체적 행동과 그 결과
-                - 리더십은 직책이 아닌 행동으로 증명
+                - 본인의 구체적 행동과 팀 차원의 정량적 결과
 
                 [참고 예시 — 기(起) 단락]
                 "기획팀은 전면 UI 개편을, 개발팀은 백엔드 안정화를 주장했습니다. 스프린트 회의가 세 번째 평행선을 달리던 날, 저는 화이트보드 앞에 섰습니다. 양쪽 요구사항을 기능 단위로 분해하고, 백엔드 병목 3건을 먼저 해소하면 UI 개편 일정이 오히려 2주 단축된다는 의존성 그래프를 그렸습니다. 그날 합의가 나왔습니다."
@@ -617,13 +654,30 @@ public class CoverLetterPromptBuilder {
                 결: 장기적으로 이 회사에서 이루고 싶은 것. 회사의 비전과 본인의 커리어 방향의 일치.
 
                 [필수 포함 요소]
-                - 추상적 다짐 절대 금지 ("열심히", "기여", "성장" → 탈락)
+                - 추상적 다짐("열심히", "기여", "성장") 대신 구체적 액션을 제시하세요
                 - 이 회사의 현재 사업/기술 과제에 대한 구체적 언급
                 - 첫 3개월 안에 할 일을 "팀명-과제명-방법론" 수준으로
-                - 3년 후 이 회사에서의 구체적 모습
 
                 [참고 예시 — 기(起) 단락]
                 "XX사의 IR 자료에서 올해 동남아 결제 인프라 확장 계획을 읽었습니다. 저는 YY시스템에서 다국가 통화 정산 모듈을 설계한 경험이 있습니다. 첫 3개월간 현재 정산 파이프라인의 병목을 매핑하고, 6개월 안에 실시간 환율 반영 정산 시스템의 프로토타입을 제안하겠습니다."
+                (위 예시의 구조와 밀도를 참고하되, 실제 회사와 지원자 경험에 맞게 새로 쓰세요.)""";
+
+            case "장단점" -> """
+                이 문항의 핵심: "자기 리스크를 인지하고 관리할 줄 아는 사람인가?"
+
+                [기승전결 적용]
+                기: 직무 맥락에서 의미 있는 장점을 한 문장으로 선언. 추상적 성격보다 직무 역량으로 표현하세요.
+                승: 장점이 발현된 구체적 에피소드. 상황→행동→결과(정량적). "저는 소통을 잘합니다"가 아닌, 실제 장면으로 증명.
+                전: 단점을 솔직히 인정하되, 그 단점이 업무에서 어떤 문제를 일으켰는지 구체적 장면 서술. 그리고 그것을 어떻게 인지하고 관리하고 있는지 현재진행형 행동.
+                결: 장점과 단점의 관리가 이 회사/직무에서 어떻게 작용할지 연결.
+
+                [필수 포함 요소]
+                - 장점은 "성격 특성"이 아닌 "직무 역량"으로 서술 (예: "꼼꼼함" → "결함 검출률 30% 향상")
+                - 단점을 장점으로 포장하면 신뢰를 잃습니다. 솔직하게 인정하세요
+                - 단점 관리의 구체적 행동 (인지→대응→현재 상태). "극복했습니다"보다 현재진행형으로
+
+                [참고 예시 — 기(起) 단락]
+                "저의 가장 큰 강점은 코드 리뷰에서 발휘됩니다. XX프로젝트에서 200건 이상의 리뷰를 수행하며, 배포 후 결함률을 12%에서 3%로 낮췄습니다. 반면, 코드 품질에 대한 높은 기준이 때로 PR 승인 지연으로 이어졌습니다. 이를 인지한 후, 리뷰 기준을 3단계로 나누고 중요도별 응답 시간을 정했습니다."
                 (위 예시의 구조와 밀도를 참고하되, 실제 회사와 지원자 경험에 맞게 새로 쓰세요.)""";
 
             case "성장과정" -> """
@@ -637,8 +691,7 @@ public class CoverLetterPromptBuilder {
 
                 [필수 포함 요소]
                 - 인생 전환점의 구체적 장면 (날짜, 장소, 상황)
-                - 추상적 미사여구가 아닌, 구체적 행동과 선택으로 가치관 증명
-                - 핵심 신념을 한 문장으로 표현
+                - 구체적 행동과 선택으로 가치관 증명 (추상적 미사여구 금지)
                 - 그 가치관이 이 회사의 문화/방향과 맞닿는 지점
 
                 [참고 예시 — 기(起) 단락]
@@ -707,8 +760,6 @@ public class CoverLetterPromptBuilder {
      * 프롬프트 상단([최우선 규칙] 바로 뒤)에 삽입되어 AI가 올바른 직무로 작성하도록 강제합니다.
      */
     private String buildJobRoleDirective(JobPosting jobPosting, List<UserExperience> experiences) {
-        String jd = jobPosting.getJobDescription();
-        if (jd != null && jd.length() >= 100) return "";
         if (experiences == null || experiences.isEmpty()) return "";
 
         Set<String> skills = new LinkedHashSet<>();
@@ -727,14 +778,27 @@ public class CoverLetterPromptBuilder {
         String skillList = skills.stream().limit(12).collect(Collectors.joining(", "));
         String inferredRole = inferRole(skills);
 
+        String jd = jobPosting.getJobDescription();
+        if (jd != null && jd.length() >= 100) {
+            // JD가 충분한 경우: 경량 지시문 (사용자 프로필만 전달)
+            return """
+
+            [지원자 프로필]
+            보유 기술: %s
+            추정 직무 분야: %s
+            위 기술스택과 직무 분야에 맞는 자소서를 작성하세요.
+            """.formatted(skillList, inferredRole);
+        }
+
+        // JD가 빈약한 경우: 직무 방향 강조
         return """
 
-            [직무 정합성 — 위반 시 즉시 탈락]
+            [직무 정합성]
             채용공고의 직무 설명이 매우 제한적입니다.
             지원자 보유 기술: %s
             추정 직무 분야: %s
             반드시 위 기술스택과 직무 분야에 맞는 자소서를 작성하세요.
-            지원자 경험과 무관한 직무(예: %s)로 작성하면 즉시 탈락입니다.
+            지원자 경험과 무관한 직무(예: %s)로 작성하지 마세요.
             """.formatted(skillList, inferredRole, getIrrelevantRoles(inferredRole));
     }
 

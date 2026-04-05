@@ -181,14 +181,31 @@ public class CoverLetterFacade {
 
     @Transactional
     public List<CoverLetter> generateFromUrl(String url) {
+        return generateFromUrl(url, null);
+    }
+
+    @Transactional
+    public List<CoverLetter> generateFromUrl(String url, Integer employmentId) {
         if (jobPostingRepository.existsByUrl(url)) {
             log.info("이미 처리된 공고: {}", url);
             JobPosting existing = jobPostingRepository.findByUrl(url).orElseThrow();
 
+            // employmentId가 지정된 경우 → 해당 직무로 다시 크롤링/생성
+            if (employmentId != null) {
+                log.info("employmentId={} 지정 — 해당 직무로 재생성: {}", employmentId, url);
+                List<CoverLetter> existingLetters = coverLetterRepository.findByJobPostingId(existing.getId());
+                if (!existingLetters.isEmpty()) {
+                    log.info("기존 자소서 {}건 삭제 후 재생성: jobPostingId={}",
+                        existingLetters.size(), existing.getId());
+                    coverLetterRepository.deleteAll(existingLetters);
+                }
+                return crawlAndGenerate(existing, employmentId);
+            }
+
             // 자동수집으로 FETCHED 상태인 공고 → 크롤링/분석부터 다시 수행
             if (existing.needsCrawling()) {
                 log.info("수집만 된 공고 — 크롤링/분석 시작: {}", url);
-                return crawlAndGenerate(existing);
+                return crawlAndGenerate(existing, null);
             }
 
             List<CoverLetter> existingLetters = coverLetterRepository.findByJobPostingId(existing.getId());
@@ -201,30 +218,49 @@ public class CoverLetterFacade {
         JobPosting jobPosting = JobPosting.from(url);
         jobPostingRepository.save(jobPosting);
 
-        return crawlAndGenerate(jobPosting);
+        return crawlAndGenerate(jobPosting, employmentId);
     }
 
     private List<CoverLetter> crawlAndGenerate(JobPosting jobPosting) {
+        return crawlAndGenerate(jobPosting, null);
+    }
+
+    private List<CoverLetter> crawlAndGenerate(JobPosting jobPosting, Integer employmentId) {
         try {
             // 1단계: 크롤링
             CrawledJobInfo crawledInfo = jsoupCrawler.crawl(jobPosting.getUrl());
 
-            // 1-1단계: 다중 직무 공고 자동 매칭
+            // 1-1단계: 다중 직무 공고 — 사용자 선택 우선, 자동 매칭 폴백
             if (crawledInfo.employmentOptions().size() > 1) {
-                List<UserExperience> experiences = userExperienceRepository.findAll();
-                EmploymentOption best = findBestEmployment(crawledInfo.employmentOptions(), experiences);
+                EmploymentOption best;
+                if (employmentId != null) {
+                    // 사용자가 직접 선택한 employment 사용
+                    best = crawledInfo.employmentOptions().stream()
+                        .filter(o -> o.id() == employmentId)
+                        .findFirst()
+                        .orElse(null);
+                    if (best != null) {
+                        log.info("[매칭] 사용자 직접 선택 직무: {} (id={})", best.field(), best.id());
+                    } else {
+                        log.warn("[매칭] 사용자 지정 employmentId={} 를 찾을 수 없음 — 자동 매칭 폴백", employmentId);
+                        List<UserExperience> experiences = userExperienceRepository.findAll();
+                        best = findBestEmployment(crawledInfo.employmentOptions(), experiences);
+                    }
+                } else {
+                    // 기존 자동 매칭
+                    List<UserExperience> experiences = userExperienceRepository.findAll();
+                    best = findBestEmployment(crawledInfo.employmentOptions(), experiences);
+                }
                 if (best != null && best.id() != crawledInfo.employmentOptions().get(0).id()) {
                     log.info("[매칭] 사용자 경험 기반 직무 자동 선택: {} (id={}) ← 기본: {} (id={})",
                         best.field(), best.id(),
                         crawledInfo.employmentOptions().get(0).field(),
                         crawledInfo.employmentOptions().get(0).id());
                     try {
-                        CrawledJobInfo refined = jsoupCrawler.fetchForEmployment(
-                            jobPosting.getUrl(), best.id());
+                        CrawledJobInfo refined = jsoupCrawler.fetchForEmployment(best.id());
                         crawledInfo = CrawledJobInfo.of(
                             crawledInfo.companyName(),
-                            refined.jobDescription().isBlank()
-                                ? crawledInfo.jobDescription() : refined.jobDescription(),
+                            mergeJobDescriptions(crawledInfo.jobDescription(), refined.jobDescription()),
                             crawledInfo.requirements(),
                             crawledInfo.deadline(),
                             crawledInfo.active(),
@@ -233,7 +269,17 @@ public class CoverLetterFacade {
                             crawledInfo.employmentOptions()
                         );
                     } catch (Exception e) {
-                        log.warn("[매칭] 선택된 employment 재조회 실패 — 기본 직무로 진행: {}", e.getMessage());
+                        log.warn("[매칭] 선택된 employment 재조회 실패 — employment 옵션 정보로 보강: {}", e.getMessage());
+                        String fallbackJd = buildFallbackEmploymentJd(best);
+                        crawledInfo = CrawledJobInfo.of(
+                            crawledInfo.companyName(),
+                            mergeJobDescriptions(crawledInfo.jobDescription(), fallbackJd),
+                            crawledInfo.requirements(),
+                            crawledInfo.deadline(),
+                            crawledInfo.active(),
+                            crawledInfo.essayQuestions(),
+                            crawledInfo.employmentOptions()
+                        );
                     }
                 } else if (best != null) {
                     log.info("[매칭] 기본 선택 직무가 최적: {} (id={})", best.field(), best.id());
@@ -298,9 +344,14 @@ public class CoverLetterFacade {
             log.info("[RAG] 검색된 경험 {}건 (단일 자소서)", experiences.size());
 
             String prompt = promptBuilder.build(jobPosting, experiences, 1000);
-            String content = enforceCharLimit(ai.generateWithContext(jobContext, prompt), 1000);
+            String content = enforceCharLimit(ai.generateWithContext(jobContext, prompt), 1000, ai, jobContext);
 
-            CoverLetter coverLetter = CoverLetter.of(jobPosting, ai.getModelName(), content);
+            int nextVersion = coverLetterRepository
+                .findTopByJobPostingIdAndQuestionIndexOrderByVersionDesc(jobPosting.getId(), 0)
+                .map(cl -> cl.getVersion() + 1)
+                .orElse(1);
+            CoverLetter coverLetter = CoverLetter.ofVersion(
+                jobPosting, ai.getModelName(), content, nextVersion, 0, null);
             coverLetterRepository.save(coverLetter);
 
             CoverLetter finalLetter = generateWithReviewLoop(
@@ -339,12 +390,16 @@ public class CoverLetterFacade {
 
             String prompt = promptBuilder.buildForQuestion(jobPosting, primary, secondary, question, masterPlan);
             int charLimit = question.charLimit() > 0 ? question.charLimit() : 1000;
-            String content = enforceCharLimit(ai.generateWithContext(jobContext, prompt), charLimit);
+            String content = enforceCharLimit(ai.generateWithContext(jobContext, prompt), charLimit, ai, jobContext);
 
-            CoverLetter coverLetter = CoverLetter.of(
-                jobPosting, ai.getModelName(), content,
-                question.number(), question.questionText()
-            );
+            int nextVersion = coverLetterRepository
+                .findTopByJobPostingIdAndQuestionIndexOrderByVersionDesc(
+                    jobPosting.getId(), question.number())
+                .map(cl -> cl.getVersion() + 1)
+                .orElse(1);
+            CoverLetter coverLetter = CoverLetter.ofVersion(
+                jobPosting, ai.getModelName(), content, nextVersion,
+                question.number(), question.questionText());
             coverLetterRepository.save(coverLetter);
 
             CoverLetter finalLetter = generateWithReviewLoop(
@@ -430,14 +485,15 @@ public class CoverLetterFacade {
             log.info("[에이전트] 개선 프롬프트 생성 → v{} 작성 중...", latest.getVersion() + 1);
             try {
                 String targetedStrategy = buildTargetedStrategy(review);
+                String reviewSummary = buildReviewSummary(review);
                 log.info("[에이전트] 타겟 전략: {}", targetedStrategy.replace("\n", " | "));
                 String improvementPrompt = promptBuilder.buildImprovementPrompt(
-                    jobPosting, experiences, questionText, currentDraft, review.rawJson(), iteration, targetedStrategy,
+                    jobPosting, experiences, questionText, currentDraft, reviewSummary, iteration, targetedStrategy,
                     charLimit, userMessage
                 );
                 String improvedContent = enforceCharLimit(
                     jobContext != null ? ai.generateWithContext(jobContext, improvementPrompt) : ai.generate(improvementPrompt),
-                    charLimit);
+                    charLimit, ai, jobContext);
 
                 // 새 버전 저장
                 CoverLetter newVersion = CoverLetter.ofVersion(
@@ -480,6 +536,43 @@ public class CoverLetterFacade {
         return QUALITY_GRADE.equals(grade) || "S".equals(grade);
     }
 
+    String buildReviewSummary(ReviewResult review) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[채용팀장 피드백]\n");
+
+        if (!review.violations().isEmpty()) {
+            sb.append("치명적 문제:\n");
+            for (String v : review.violations()) {
+                sb.append("- ").append(v).append("\n");
+            }
+        }
+
+        if (!review.improvements().isEmpty()) {
+            sb.append("\n수정 목표:\n");
+            for (String imp : review.improvements()) {
+                sb.append("- ").append(imp).append("\n");
+            }
+        }
+
+        var weakest = review.getWeakestDimensions(2);
+        if (!weakest.isEmpty()) {
+            sb.append("\n최약 항목:\n");
+            for (var dim : weakest) {
+                String field = (String) dim.get("field");
+                String name = (String) dim.get("name");
+                int score = (int) dim.get("score");
+                sb.append("▸ ").append(name).append(" (").append(score).append("점): ")
+                    .append(getFixAdvice(field, score)).append("\n");
+            }
+        }
+
+        if (review.overallComment() != null && !review.overallComment().isBlank()) {
+            sb.append("\n총평: ").append(review.overallComment());
+        }
+
+        return sb.toString();
+    }
+
     String buildTargetedStrategy(ReviewResult review) {
         var weakest = review.getWeakestDimensions(3);
         StringBuilder sb = new StringBuilder();
@@ -499,33 +592,59 @@ public class CoverLetterFacade {
 
     String getFixAdvice(String field, int score) {
         return switch (field) {
-            case "answerRelevance" -> "[기준5] 첫 문장부터 질문 키워드에 직접 응답하세요. 질문이 묻는 것에 정면으로 답하고, 문항 하위 질문을 빠짐없이 다루세요.";
-            case "jobFit" -> "[기준1] 채용공고 자격요건의 기술 키워드를 본인 경험과 직접 연결하세요. 구체적 프로젝트와 성과를 매칭하세요.";
-            case "orgFit" -> "[기준2,8] 회사 분석의 핵심 가치/문화를 구체적으로 언급하세요. 기업 고유명사 2개 이상 필수. 이 회사가 아니면 안 되는 절실함을 보여주세요.";
-            case "specificity" -> "[기준4] '많은 개선'→'응답시간 2.3초→0.4초'로 교체하세요. 숫자, 프로젝트명, KPI를 반드시 포함하세요.";
-            case "authenticity" -> "[기준3,8] 이 지원자만 쓸 수 있는 구체적 장면을 추가하세요. 진부한 표현을 제거하고, 날짜/시간/감정 등 생생한 디테일을 녹이세요.";
-            case "aiDetectionRisk" -> "[기준3] 어미 반복을 깨고, 구어체 전환어('솔직히', '돌이켜보면')를 추가하고, 감정 표현을 넣으세요.";
-            case "logicalStructure" -> "[기준6] 기승전결 순서를 점검하세요. 불필요한 수식어를 삭제하고, 단락 간 논리 연결이 자연스러운지 확인하세요.";
-            case "keywordUsage" -> "[기준1] 채용공고의 핵심 키워드 3~5개를 추출하여 문맥에 맞게 자연스럽게 포함하세요.";
-            case "experienceConsistency" -> "[기준4] 제공된 경험 목록에 없는 프로젝트나 경력을 삭제하세요. 실제 경험만 정확히 인용하세요.";
+            case "answerRelevance" -> "질문이 묻는 것에 정면으로 답하세요. 문항 하위 질문을 빠짐없이 다루세요.";
+            case "jobFit" -> "채용공고 자격요건의 기술 키워드를 본인 경험과 직접 연결하세요. 구체적 프로젝트와 성과를 매칭하세요.";
+            case "orgFit" -> "회사의 Pain Point를 짚고, 내 경험이 그것과 어떻게 맞닿는지 연결하세요. 이 회사가 아니면 안 되는 이유를 보여주세요.";
+            case "specificity" -> "'많은 개선'→'응답시간 2.3초→0.4초'로 교체하세요. 숫자, 프로젝트명, KPI를 반드시 포함하세요.";
+            case "authenticity" -> "이 지원자만 쓸 수 있는 구체적 장면을 추가하세요. 판단 근거('왜 그 선택을 했는지')를 녹이세요.";
+            case "aiDetectionRisk" -> "문장 길이와 어미에 변화를 주세요. 정형화된 구조를 깨고, 사람이 쓴 글의 호흡을 살리세요.";
+            case "logicalStructure" -> "기승전결 순서를 점검하세요. 불필요한 수식어를 삭제하고, 단락 간 논리 연결을 자연스럽게 하세요.";
+            case "keywordUsage" -> "채용공고의 핵심 키워드 3~5개를 문맥에 맞게 자연스럽게 포함하세요.";
+            case "experienceConsistency" -> "제공된 경험 목록에 없는 프로젝트나 경력을 삭제하세요. 실제 경험만 정확히 인용하세요.";
             default -> "해당 항목의 점수를 높이기 위해 구체성과 관련성을 강화하세요.";
         };
     }
 
-    String enforceCharLimit(String content, int charLimit) {
+    String enforceCharLimit(String content, int charLimit, AiPort ai, String jobContext) {
         if (charLimit <= 0 || content == null) return content;
         if (content.length() <= charLimit) return content;
 
-        // 120% 초과 시 문장 단위 트리밍
         double ratio = (double) content.length() / charLimit;
-        if (ratio > 1.2) {
-            log.warn("[글자수] 제한 대비 {}% 초과 ({}/{}자) — 문장 단위 트리밍 적용",
+
+        // 20% 초과: AI 재작성
+        if (ratio > 1.2 && ai != null) {
+            log.warn("[글자수] 제한 대비 {}% 초과 ({}/{}자) — AI 재작성 적용",
                 Math.round((ratio - 1) * 100), content.length(), charLimit);
+            try {
+                String rewritePrompt = """
+                    아래 자소서가 글자수 제한을 초과했습니다.
+                    핵심 메시지와 수치를 모두 유지하면서, 군더더기만 제거하여 %d자 이내로 줄여주세요.
+                    결론 단락은 절대 삭제하지 마세요. 자소서 본문만 출력하세요.
+
+                    [현재 자소서 (%d자)]
+                    %s""".formatted(charLimit, content.length(), content);
+                String rewritten = jobContext != null
+                    ? ai.generateWithContext(jobContext, rewritePrompt)
+                    : ai.generate(rewritePrompt);
+                if (rewritten != null && !rewritten.isBlank() && rewritten.length() <= charLimit) {
+                    log.info("[글자수] AI 재작성 성공: {}자 → {}자 (제한: {}자)",
+                        content.length(), rewritten.length(), charLimit);
+                    return rewritten;
+                }
+                log.warn("[글자수] AI 재작성 결과가 여전히 초과 ({}자) — 문장 트리밍 폴백",
+                    rewritten != null ? rewritten.length() : 0);
+                // AI 재작성 결과가 여전히 초과이면 그 결과에 문장 트리밍 적용
+                if (rewritten != null && !rewritten.isBlank()) {
+                    content = rewritten;
+                }
+            } catch (Exception e) {
+                log.warn("[글자수] AI 재작성 실패 — 문장 트리밍 폴백: {}", e.getMessage());
+            }
         } else {
             log.info("[글자수] 제한 초과 ({}/{}자) — 문장 단위 트리밍 적용", content.length(), charLimit);
         }
 
-        // 문장 단위로 분리하여 charLimit 이내로 자르기
+        // 20% 이내 초과 또는 AI 재작성 폴백: 문장 단위 트리밍
         String[] sentences = content.split("(?<=[.!?。])\\s*");
         StringBuilder trimmed = new StringBuilder();
         for (String sentence : sentences) {
@@ -535,7 +654,6 @@ public class CoverLetterFacade {
             trimmed.append(sentence);
         }
 
-        // 문장 단위로 잘라도 빈 문자열이면 강제 절삭
         if (trimmed.isEmpty()) {
             return content.substring(0, charLimit);
         }
@@ -626,6 +744,9 @@ public class CoverLetterFacade {
 
     private String classifyForRetrieval(String questionText) {
         String q = questionText.toLowerCase();
+        if (q.contains("포트폴리오") || q.contains("github") || q.contains("깃허브")
+            || q.contains("블로그") || q.contains("url") || q.contains("링크")
+            || q.contains("첨부") || q.contains("파일") || q.contains("노션")) return "포트폴리오";
         if (q.contains("지원동기") || q.contains("지원 동기")
             || (q.contains("왜") && q.contains("회사"))
             || (q.contains("선택") && q.contains("이유"))
@@ -638,18 +759,22 @@ public class CoverLetterFacade {
             || q.contains("갈등") || q.contains("설득") || q.contains("커뮤니케이션") || q.contains("조직")) return "협업리더십";
         if ((q.contains("입사") && q.contains("후")) || q.contains("포부") || q.contains("계획")
             || q.contains("비전") || q.contains("목표") || q.contains("각오")) return "입사후포부";
+        if (q.contains("장단점") || q.contains("장점과 단점") || q.contains("장점") && q.contains("단점")
+            || q.contains("약점") || q.contains("보완")) return "장단점";
         if (q.contains("성장") || q.contains("가치") || q.contains("인생") || q.contains("신념")
-            || q.contains("좌우명") || q.contains("성격") || q.contains("장단점") || q.contains("본인 소개")) return "성장과정";
+            || q.contains("좌우명") || q.contains("성격") || q.contains("본인 소개")) return "성장과정";
         return "일반";
     }
 
     private String retrievalKeywords(String questionText) {
         return switch (classifyForRetrieval(questionText)) {
+            case "포트폴리오" -> "프로젝트 포트폴리오 GitHub 블로그";
             case "지원동기" -> "동기 관심 계기 선택 이유";
             case "핵심역량" -> "역량 기술 성과 전문성";
             case "문제해결" -> "문제 해결 도전 극복 장애";
             case "협업리더십" -> "협업 팀 리더 소통 갈등 조율";
             case "입사후포부" -> "목표 계획 비전 성장 기여";
+            case "장단점" -> "장점 단점 강점 약점 보완 개선";
             case "성장과정" -> "가치관 경험 전환점 성장";
             default -> "";
         };
@@ -748,6 +873,42 @@ public class CoverLetterFacade {
             if (text.contains(kw)) count++;
         }
         return count;
+    }
+
+    /**
+     * 원본 JD에서 회사 정보를 보존하고, employment 관련 섹션만 교체합니다.
+     * 원본 JD 구조: [회사 소개]...[업종]...[홈페이지]...[직무 분야]...[포지션]...
+     * → [직무 분야] 이전까지를 회사 정보로 보존하고, 이후를 refined로 교체합니다.
+     */
+    private String mergeJobDescriptions(String originalJd, String refinedEmploymentJd) {
+        if (refinedEmploymentJd == null || refinedEmploymentJd.isBlank()) return originalJd;
+        if (originalJd == null || originalJd.isBlank()) return refinedEmploymentJd;
+
+        Set<String> employmentTags = Set.of("[직무 분야]", "[포지션]", "[부서]", "[경력 구분]", "[채용 설명]");
+
+        StringBuilder companyInfo = new StringBuilder();
+        for (String line : originalJd.split("\n")) {
+            if (employmentTags.stream().anyMatch(line.trim()::startsWith)) break;
+            companyInfo.append(line).append("\n");
+        }
+
+        String company = companyInfo.toString().stripTrailing();
+        if (company.isBlank()) return refinedEmploymentJd;
+        return company + "\n\n" + refinedEmploymentJd;
+    }
+
+    /**
+     * fetchForEmployment 실패 시, EmploymentOption 기본 정보로 최소한의 JD를 구성합니다.
+     */
+    private String buildFallbackEmploymentJd(EmploymentOption option) {
+        StringBuilder sb = new StringBuilder();
+        if (option.field() != null && !option.field().isBlank())
+            sb.append("[직무 분야] ").append(option.field()).append("\n");
+        if (option.title() != null && !option.title().isBlank())
+            sb.append("[포지션] ").append(option.title()).append("\n");
+        if (option.department() != null && !option.department().isBlank())
+            sb.append("[부서] ").append(option.department()).append("\n");
+        return sb.toString();
     }
 
     private LocalDate parseDeadline(String deadline) {
