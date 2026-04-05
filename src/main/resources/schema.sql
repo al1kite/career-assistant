@@ -18,12 +18,13 @@ CREATE TABLE cover_letters (
     ai_model       VARCHAR(50),
     content        TEXT,
     version        INT DEFAULT 1,
-    question_index INT,
+    question_index INT NOT NULL DEFAULT 0,
     question_text  TEXT,
     feedback       TEXT,
     review_score   INT,
     created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (job_posting_id) REFERENCES job_postings(id)
+    FOREIGN KEY (job_posting_id) REFERENCES job_postings(id),
+    UNIQUE KEY uk_job_question_version (job_posting_id, question_index, version)
 );
 
 CREATE TABLE user_experiences (

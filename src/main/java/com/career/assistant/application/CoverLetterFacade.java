@@ -346,7 +346,12 @@ public class CoverLetterFacade {
             String prompt = promptBuilder.build(jobPosting, experiences, 1000);
             String content = enforceCharLimit(ai.generateWithContext(jobContext, prompt), 1000, ai, jobContext);
 
-            CoverLetter coverLetter = CoverLetter.of(jobPosting, ai.getModelName(), content);
+            int nextVersion = coverLetterRepository
+                .findTopByJobPostingIdAndQuestionIndexOrderByVersionDesc(jobPosting.getId(), 0)
+                .map(cl -> cl.getVersion() + 1)
+                .orElse(1);
+            CoverLetter coverLetter = CoverLetter.ofVersion(
+                jobPosting, ai.getModelName(), content, nextVersion, 0, null);
             coverLetterRepository.save(coverLetter);
 
             CoverLetter finalLetter = generateWithReviewLoop(
@@ -387,10 +392,14 @@ public class CoverLetterFacade {
             int charLimit = question.charLimit() > 0 ? question.charLimit() : 1000;
             String content = enforceCharLimit(ai.generateWithContext(jobContext, prompt), charLimit, ai, jobContext);
 
-            CoverLetter coverLetter = CoverLetter.of(
-                jobPosting, ai.getModelName(), content,
-                question.number(), question.questionText()
-            );
+            int nextVersion = coverLetterRepository
+                .findTopByJobPostingIdAndQuestionIndexOrderByVersionDesc(
+                    jobPosting.getId(), question.number())
+                .map(cl -> cl.getVersion() + 1)
+                .orElse(1);
+            CoverLetter coverLetter = CoverLetter.ofVersion(
+                jobPosting, ai.getModelName(), content, nextVersion,
+                question.number(), question.questionText());
             coverLetterRepository.save(coverLetter);
 
             CoverLetter finalLetter = generateWithReviewLoop(

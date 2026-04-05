@@ -51,6 +51,7 @@ public class CoverLetter {
         letter.aiModel = aiModel;
         letter.content = content;
         letter.version = 1;
+        letter.questionIndex = 0;
         letter.createdAt = LocalDateTime.now();
         return letter;
     }
